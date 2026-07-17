@@ -7,7 +7,7 @@ from typing import Optional
 
 
 # Global connectivity flag (shared across instances)
-_connected: bool = False
+_connected: bool = True
 
 class ExchangeError(Exception):
     pass
@@ -27,7 +27,7 @@ class ExchangeClient:
         exchange_class = getattr(ccxt, exchange_name)
         params = {
             "enableRateLimit": True,
-        "timeout": 5000,
+        "timeout": 3000,
             "options": {"defaultType": "spot"},
         }
         if api_key and secret:
