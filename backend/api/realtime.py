@@ -64,7 +64,8 @@ async def websocket_ticker(websocket: WebSocket):
             if now - last_hour_reset > 3600:
                 engine.reset_hour()
                 last_hour_reset = now
-            await websocket.send_json(await engine.tick())
+            ticker_data = await engine.tick()
+            await websocket.send_json(ticker_data)
             await websocket.send_json({
                 "type": "candle",
                 "symbol": "BTC/USDT",
