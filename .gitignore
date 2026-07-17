@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+.env.local
+
+# Node
+node_modules/
+.next/
+
+# Data
+*.db
+*.db-journal
+
+# Logs
+*.log
+dev-server.log
+frontend-start.log
+frontend-error.log
+
+# OS
+.DS_Store
+Thumbs.db
