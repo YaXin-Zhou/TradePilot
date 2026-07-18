@@ -56,6 +56,18 @@ export const api = {
   deleteStrategy: (id: string) =>
     request(`/api/strategies/${id}`, { method: "DELETE" }),
 
+
+  // AI Strategy
+  aiAnalyze: (data: { api_key: string; strategy_desc: string; symbol?: string; timeframe?: string }) =>
+    request("/api/ai/analyze", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  testAIConnection: (apiKey: string) =>
+    request("/api/ai/test-connection", {
+      method: "POST",
+      body: JSON.stringify({ api_key: apiKey }),
+    }),
   // Analysis
   getIndicators: (symbol = "BTC/USDT", timeframe = "1h") =>
     request(`/api/analysis/indicators?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}`),

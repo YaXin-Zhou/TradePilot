@@ -41,12 +41,14 @@ from api.trading import router as trading_router
 from api.portfolio import router as portfolio_router
 from api.strategies import router as strategies_router
 from api.analysis import router as analysis_router
+from api.ai_strategy import router as ai_router
 
 app.include_router(market_router)
 app.include_router(trading_router)
 app.include_router(portfolio_router)
 app.include_router(strategies_router)
 app.include_router(analysis_router)
+app.include_router(ai_router)
 
 
 @app.get("/api/health")

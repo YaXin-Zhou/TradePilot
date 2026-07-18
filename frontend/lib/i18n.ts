@@ -5,6 +5,7 @@ const zh: Record<string, string> = {
   "nav.strategies": "策略",
   "nav.analysis": "AI 分析",
   "nav.wallet": "钱包",
+  "nav.aiStrategy": "AI 策略",
   "nav.settings": "设置",
 
   "dash.overview": "概览",
@@ -150,6 +151,7 @@ const en: Record<string, string> = {
   "nav.strategies": "Strategies",
   "nav.analysis": "AI Analysis",
   "nav.wallet": "Wallet",
+  "nav.aiStrategy": "AI Strategy",
   "nav.settings": "Settings",
 
   "dash.overview": "Overview",

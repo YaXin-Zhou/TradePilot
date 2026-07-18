@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { label: "nav.strategies", icon: BarChart3, href: "/strategies", color: "#f0b90b" },
   { label: "nav.analysis", icon: Activity, href: "/analysis", color: "#a855f7" },
   { label: "nav.wallet", icon: Wallet, href: "/wallet", color: "#848e9c" },
+  { label: "nav.aiStrategy", icon: BrainCircuit, href: "/ai-strategy", color: "#6366f1" },
   { label: "nav.settings", icon: Settings, href: "/settings", color: "#848e9c" },
 ];
 

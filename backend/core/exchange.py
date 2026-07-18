@@ -33,7 +33,7 @@ class ExchangeClient:
         exchange_class = getattr(ccxt, exchange_name)
         params = {
             "enableRateLimit": True,
-        "timeout": 3000,
+        "timeout": 1500,
             "options": {"defaultType": "spot"},
         }
         if api_key and secret:
@@ -86,6 +86,8 @@ class ExchangeClient:
 
     def fetch_ohlcv(self, symbol: str, timeframe: str = "1h", limit: int = 200) -> pd.DataFrame:
         self._ensure_markets()
+        if not self._connected:
+            raise ConnectionError('offline')
         ohlcv = self._exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
         df = pd.DataFrame(
             ohlcv,
@@ -97,6 +99,8 @@ class ExchangeClient:
 
     def fetch_orderbook(self, symbol: str, limit: int = 20) -> dict:
         self._ensure_markets()
+        if not self._connected:
+            raise ConnectionError('offline')
         ob = self._exchange.fetch_order_book(symbol, limit)
         return {
             "bids": [[float(p), float(v)] for p, v in ob.get("bids", [])],
@@ -106,6 +110,8 @@ class ExchangeClient:
 
     def fetch_balance(self, currency: Optional[str] = None) -> dict:
         self._ensure_markets()
+        if not self._connected:
+            raise ConnectionError('offline')
         bal = self._exchange.fetch_balance()
         if currency:
             c = bal.get(currency, {})
