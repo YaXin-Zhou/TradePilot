@@ -15,7 +15,6 @@ from db.database import init_db, close_db
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    asyncio.create_task(_check_exchange_connectivity())
     yield
     await close_db()
 

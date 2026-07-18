@@ -9,6 +9,12 @@ from typing import Optional
 # Global connectivity flag (shared across instances)
 _connected: bool = True
 
+
+def set_connected(value: bool):
+    global _connected
+    _connected = value
+
+
 class ExchangeError(Exception):
     pass
 
