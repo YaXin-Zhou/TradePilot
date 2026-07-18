@@ -1,18 +1,10 @@
 """市场数据 API - 带模拟数据后备"""
 from fastapi import APIRouter, Query
-from core.exchange import ExchangeClient
+from core.exchange import shared_exchange as _exchange
 from config import settings
 import time, random, math
 
 router = APIRouter(prefix="/api/market", tags=["market"])
-
-_exchange = ExchangeClient(
-    exchange_name=settings.EXCHANGE_NAME,
-    api_key=settings.EXCHANGE_API_KEY,
-    secret=settings.EXCHANGE_SECRET,
-    passphrase=settings.EXCHANGE_PASSPHRASE,
-    testnet=settings.EXCHANGE_TESTNET,
-)
 
 
 def _mock_ticker(symbol="BTC/USDT"):

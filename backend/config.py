@@ -1,8 +1,12 @@
 """
 AI 量化交易系统 - 全局配置
 """
+from dotenv import load_dotenv
 import os
 from pathlib import Path
+
+# Load .env from backend directory
+load_dotenv(Path(__file__).parent / ".env")
 
 
 class Settings:
@@ -51,4 +55,5 @@ class Settings:
 
 
 settings = Settings()
+
 

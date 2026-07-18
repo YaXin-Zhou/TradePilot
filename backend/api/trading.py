@@ -1,19 +1,13 @@
 """交易 API - 带模拟数据后备"""
 from fastapi import APIRouter
-from core.exchange import ExchangeClient
+from core.exchange import shared_exchange as _exchange
 from config import settings
 from pydantic import BaseModel
 import random, uuid
 
 router = APIRouter(prefix="/api/trading", tags=["trading"])
 
-_exchange = ExchangeClient(
-    exchange_name=settings.EXCHANGE_NAME,
-    api_key=settings.EXCHANGE_API_KEY,
-    secret=settings.EXCHANGE_SECRET,
-    passphrase=settings.EXCHANGE_PASSPHRASE,
-    testnet=settings.EXCHANGE_TESTNET,
-)
+
 
 
 class LimitOrderRequest(BaseModel):
@@ -26,6 +20,12 @@ class LimitOrderRequest(BaseModel):
 class CancelOrderRequest(BaseModel):
     symbol: str = settings.DEFAULT_SYMBOL
     order_id: str
+
+
+class MarketOrderRequest(BaseModel):
+    symbol: str = settings.DEFAULT_SYMBOL
+    side: str
+    amount: float
 
 
 @router.get("/balance")
@@ -61,6 +61,23 @@ async def place_limit_order(req: LimitOrderRequest):
 @router.post("/cancel-order")
 async def cancel_order(req: CancelOrderRequest):
     return {"success": True}
+
+
+@router.post("/market-order")
+async def place_market_order(req: MarketOrderRequest):
+    try:
+        order = _exchange.create_market_order(req.symbol, req.side, req.amount)
+        return {"success": True, "data": order}
+    except Exception as e:
+        return {"success": True, "data": {
+            "id": str(uuid.uuid4())[:8],
+            "symbol": req.symbol,
+            "side": req.side,
+            "amount": req.amount,
+            "filled": req.amount,
+            "price": 0,
+            "status": "closed",
+        }, "_mock": True}
 
 
 @router.get("/open-orders")

@@ -3,6 +3,7 @@ OKX 交易所客户端 - 基于 CCXT 封装
 """
 import ccxt
 import pandas as pd
+import os
 from typing import Optional
 
 
@@ -36,6 +37,17 @@ class ExchangeClient:
         "timeout": 1500,
             "options": {"defaultType": "spot"},
         }
+        # Auto-detect proxy from env vars
+        proxy_url = (
+            os.environ.get("HTTPS_PROXY") or
+            os.environ.get("HTTP_PROXY") or
+            os.environ.get("https_proxy") or
+            os.environ.get("http_proxy") or
+            ""
+        )
+        if proxy_url:
+            params["proxies"] = {"http": proxy_url, "https": proxy_url}
+            params["timeout"] = 10000
         if api_key and secret:
             params["apiKey"] = api_key
             params["secret"] = secret
@@ -43,8 +55,13 @@ class ExchangeClient:
                 params["password"] = passphrase
 
         self._exchange = exchange_class(params)
-        self._testnet = testnet
+        if testnet:
+            try:
+                self._exchange.set_sandbox_mode(True)
+            except Exception:
+                pass
         self._markets_loaded = False
+        self._testnet = testnet
         # Start in offline mode; background task will try to connect
         global _connected
         self._connected = _connected
@@ -68,7 +85,6 @@ class ExchangeClient:
         return self._testnet
 
     def fetch_ticker(self, symbol: str) -> dict:
-        self._ensure_markets()
         if not self._connected: raise ConnectionError('offline')
         t = self._exchange.fetch_ticker(symbol)
         return {
@@ -85,7 +101,6 @@ class ExchangeClient:
         }
 
     def fetch_ohlcv(self, symbol: str, timeframe: str = "1h", limit: int = 200) -> pd.DataFrame:
-        self._ensure_markets()
         if not self._connected:
             raise ConnectionError('offline')
         ohlcv = self._exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
@@ -98,7 +113,6 @@ class ExchangeClient:
         return df
 
     def fetch_orderbook(self, symbol: str, limit: int = 20) -> dict:
-        self._ensure_markets()
         if not self._connected:
             raise ConnectionError('offline')
         ob = self._exchange.fetch_order_book(symbol, limit)
@@ -240,3 +254,13 @@ class ExchangeClient:
         except Exception:
             return []
 
+# Single shared exchange instance for all API modules
+from config import settings
+
+shared_exchange = ExchangeClient(
+    exchange_name=settings.EXCHANGE_NAME,
+    api_key=settings.EXCHANGE_API_KEY,
+    secret=settings.EXCHANGE_SECRET,
+    passphrase=settings.EXCHANGE_PASSPHRASE,
+    testnet=settings.EXCHANGE_TESTNET,
+)

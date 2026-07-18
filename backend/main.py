@@ -64,4 +64,8 @@ from core.exchange import set_connected, ExchangeClient
 from config import settings
 import asyncio
 app.include_router(realtime_router)
+from api.backtest import router as backtest_router
+app.include_router(backtest_router)
+from api.exchange import router as exchange_router
+app.include_router(exchange_router)
 

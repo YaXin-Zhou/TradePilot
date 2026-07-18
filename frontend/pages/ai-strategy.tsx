@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { api } from "../lib/api";
 import { useLanguage } from "../lib/LanguageContext";
-import { BrainCircuit, Send, Zap, Key, RefreshCw, TrendingUp, TrendingDown, Minus, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { Brain, Send, Zap, Key, RefreshCw, TrendingUp, TrendingDown, Minus, ArrowUpRight, ArrowDownRight } from "lucide-react";
+
 
 export default function AIStrategyPage() {
   const [apiKey, setApiKey] = useState("");
@@ -11,11 +12,17 @@ export default function AIStrategyPage() {
   const [ticker, setTicker] = useState<any>(null);
   const [connected, setConnected] = useState(false);
   const [keySaved, setKeySaved] = useState(false);
+  const [balance, setBalance] = useState<any>(null);
+  const [orderAmount, setOrderAmount] = useState(100);
+  const [orderType, setOrderType] = useState("market");
+  const [placingOrder, setPlacingOrder] = useState(false);
+  const [placedOrder, setPlacedOrder] = useState<any>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem("deepseek_key");
     if (saved) setApiKey(saved);
     api.getTicker().then(setTicker).catch(() => {});
+    api.getBalance().then(setBalance).catch(() => {});
   }, []);
 
   const saveKey = () => {
@@ -47,6 +54,19 @@ export default function AIStrategyPage() {
     setLoading(false);
   };
 
+  const placeOrder = async (signal: string) => {
+    const side = signal.includes("buy") ? "buy" : "sell";
+    setPlacingOrder(true);
+    setPlacedOrder(null);
+    try {
+      const res = await api.placeMarketOrder({ side, amount: orderAmount });
+      setPlacedOrder(res);
+    } catch (e: any) {
+      setPlacedOrder({ error: e.message });
+    }
+    setPlacingOrder(false);
+  };
+
   const SignalBadge = ({ signal }: { signal: string }) => {
     if (signal === "buy" || signal === "strong_buy")
       return <span className="text-green text-lg font-bold flex items-center gap-1"><ArrowUpRight size={20} />{signal === "strong_buy" ? "STRONG BUY" : "BUY"}</span>;
@@ -72,7 +92,7 @@ export default function AIStrategyPage() {
           </div>
 
           <div className="card">
-            <div className="flex items-center gap-2 mb-3"><BrainCircuit size={16} className="text-indigo-400" /><span className="text-sm font-semibold text-white">Strategy Description</span></div>
+            <div className="flex items-center gap-2 mb-3"><Brain size={16} className="text-indigo-400" /><span className="text-sm font-semibold text-white">Strategy Description</span></div>
             <textarea value={strategy} onChange={(e) => setStrategy(e.target.value)}
               placeholder="Buy when RSI(14) < 30 and price above EMA200&#10;Sell when RSI(14) > 70&#10;Position size: 10%&#10;Stop loss: 2%"
               className="w-full h-32 resize-none text-sm" style={{fontFamily:"monospace"}} />
@@ -98,7 +118,7 @@ export default function AIStrategyPage() {
         <div className="space-y-4">
           {loading && (
             <div className="card flex items-center justify-center py-12">
-              <div className="text-center"><BrainCircuit size={40} className="mx-auto mb-3 text-purple-400 animate-pulse" /><p className="text-sm text-dark-400">AI is analyzing...</p></div>
+              <div className="text-center"><Brain size={40} className="mx-auto mb-3 text-purple-400 animate-pulse" /><p className="text-sm text-dark-400">AI is analyzing...</p></div>
             </div>
           )}
 
@@ -138,10 +158,47 @@ export default function AIStrategyPage() {
               )}
             </div>
           )}
+          {result && (result.signal === "buy" || result.signal === "strong_buy" || result.signal === "sell" || result.signal === "strong_sell") && (
+            <div className="mt-4 pt-4 border-t border-dark-800">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-semibold text-white">Execute Trade</span>
+                {balance && (
+                  <span className="text-xs text-dark-400">
+                    USDT: ${balance.USDT?.free?.toFixed(2) || "0.00"}
+                  </span>
+                )}
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-dark-400 block mb-1">Amount (USDT)</label>
+                  <input type="number" value={orderAmount}
+                    onChange={e => setOrderAmount(Number(e.target.value))}
+                    className="w-full text-sm py-1.5 px-2 rounded border border-dark-800 bg-dark-900 text-dark-200" />
+                </div>
+                <button onClick={() => placeOrder(result.signal)}
+                  disabled={placingOrder}
+                  className="w-full flex items-center justify-center gap-2 text-sm py-2.5 rounded font-semibold"
+                  style={{
+                    background: result.signal.includes("buy") ? "#00c076" : "#f6465d",
+                    color: "#000",
+                    opacity: placingOrder ? 0.6 : 1,
+                  }}>
+                  {placingOrder ? "Placing..." : result.signal.includes("buy") ? "Buy BTC" : "Sell BTC"}
+                </button>
+                {placedOrder && (
+                  <div className={`text-xs p-2 rounded ${placedOrder.error ? "bg-okx-red/10 text-okx-red" : "bg-okx-green/10 text-okx-green"}`}>
+                    {placedOrder.error
+                      ? "Error: " + placedOrder.error
+                      : "Order placed! ID: " + placedOrder.id + " Status: " + placedOrder.status}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {!result && !loading && (
             <div className="card flex items-center justify-center py-16">
-              <div className="text-center"><BrainCircuit size={48} className="mx-auto mb-3 text-dark-600" /><p className="text-sm text-dark-400">Describe your strategy and click Analyze</p></div>
+              <div className="text-center"><Brain size={48} className="mx-auto mb-3 text-dark-600" /><p className="text-sm text-dark-400">Describe your strategy and click Analyze</p></div>
             </div>
           )}
         </div>
@@ -165,3 +222,4 @@ export default function AIStrategyPage() {
     </div>
   );
 }
+
