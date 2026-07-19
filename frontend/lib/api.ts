@@ -10,6 +10,9 @@ async function getToast() {
   return _toast?.toast;
 }
 
+// 防止 401 时重复跳转 /login（多个并发请求同时收到 401 会触发多次跳转 → 闪烁）
+let _isRedirectingToLogin = false;
+
 async function request(path: string, options?: RequestInit, timeoutMs: number = 8000) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -22,7 +25,14 @@ async function request(path: string, options?: RequestInit, timeoutMs: number = 
   clearTimeout(timeoutId);
   if (res.status === 401) {
     clearToken();
-    if (typeof window !== "undefined") window.location.href = "/login";
+    // 仅在浏览器环境、且当前不在 /login 页面时跳转，避免 login 页面无限重载
+    if (typeof window !== "undefined" && !_isRedirectingToLogin) {
+      const onLogin = window.location.pathname === "/login";
+      if (!onLogin) {
+        _isRedirectingToLogin = true;
+        window.location.href = "/login";
+      }
+    }
     throw new Error("Unauthorized");
   }
   clearTimeout(timeoutId);
