@@ -1,11 +1,20 @@
 import asyncio
-"""APScheduler 定时任务"""
+"""APScheduler 定时任务 — Phase 8 任务隔离 + 执行记录"""
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 from datetime import datetime, timezone
 from core.logger import log
 
 scheduler = AsyncIOScheduler()
+
+
+def _job_listener(event):
+    """任务执行监听器 — 记录异常和执行情况（Phase 8: 任务隔离）"""
+    if event.exception:
+        log.error(f"Scheduler job {event.job_id} FAILED: {event.exception}")
+    else:
+        log.debug(f"Scheduler job {event.job_id} executed OK")
 
 
 async def sync_market_data():
@@ -76,6 +85,8 @@ def start_scheduler():
     scheduler.add_job(sync_market_data, IntervalTrigger(hours=1), id="sync_market_data", replace_existing=True)
     scheduler.add_job(retrain_ml_models, IntervalTrigger(hours=24), id="retrain_ml_models", replace_existing=True)
     scheduler.add_job(ai_heartbeat, IntervalTrigger(hours=6), id="ai_heartbeat", replace_existing=True)
+    # Phase 8: 任务执行监听（异常隔离 + 记录）
+    scheduler.add_listener(_job_listener, EVENT_JOB_ERROR | EVENT_JOB_EXECUTED)
     scheduler.start()
     log.info("Scheduler started (market data: 1h, ML retrain: 24h, AI heartbeat: 6h)")
 

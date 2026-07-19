@@ -282,8 +282,13 @@ class StrategyPool:
                 raw = json.loads(self.POOL_FILE.read_text(encoding="utf-8"))
                 for sid, data in raw.items():
                     returns = data.pop("return_series", [])
-                    s = PoolStrategy(id=sid, **{k: v for k, v in data.items()
-                        if k in PoolStrategy.__dataclass_fields__})
+                    # 注意：to_dict() 序列化的 data 中已包含 "id" 字段，
+                    # 与构造参数 id=sid 冲突会触发
+                    # "multiple values for keyword argument 'id'"。
+                    # 这里显式移除，统一用 sid 作为权威 id。
+                    fields = {k: v for k, v in data.items()
+                              if k in PoolStrategy.__dataclass_fields__ and k != "id"}
+                    s = PoolStrategy(id=sid, **fields)
                     s.return_series = returns
                     # status str → enum
                     if isinstance(data.get("status"), str):

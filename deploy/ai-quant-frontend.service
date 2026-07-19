@@ -1,0 +1,27 @@
+# AI Quant Trade — Frontend systemd unit (Linux 部署用)
+# 安装: sudo cp ai-quant-frontend.service /etc/systemd/system/
+# 启动: sudo systemctl daemon-reload && sudo systemctl enable --now ai-quant-frontend
+
+[Unit]
+Description=AI Quant Trade Frontend (Next.js)
+After=network.target ai-quant-backend.service
+Wants=ai-quant-backend.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/ai-quant-trade/frontend
+EnvironmentFile=/opt/ai-quant-trade/frontend/.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -63,11 +63,23 @@ class Settings:
     ML_SEQUENCE_LENGTH: int = 60
     ML_TRAIN_INTERVAL_HOURS: int = 24
 
-    # 风险控制
+    # 风险控制 — 保守档（用户确认）：单笔≤200，总持仓≤2000
+    MAX_ORDER_AMOUNT_USDT: float = float(os.getenv("MAX_ORDER_AMOUNT_USDT", "200.0"))   # 单笔下单硬上限
+    MAX_TOTAL_POSITION_USDT: float = float(os.getenv("MAX_TOTAL_POSITION_USDT", "2000.0"))  # 总持仓硬上限
     MAX_POSITION_SIZE_USDT: float = 5000.0
     MAX_DAILY_LOSS_PCT: float = 5.0
     STOP_LOSS_PCT: float = 10.0
     MAX_OPEN_ORDERS: int = 50
+
+    # 实盘交易对白名单（逗号分隔，空=不限制但不推荐）
+    LIVE_SYMBOL_WHITELIST: list[str] = [
+        s.strip() for s in os.getenv(
+            "LIVE_SYMBOL_WHITELIST", "BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,XRP/USDT"
+        ).split(",") if s.strip()
+    ]
+
+    # AI 功能在实盘模式是否禁用（用户确认：实盘先关，模拟盘用）
+    DISABLE_AI_IN_LIVE: bool = os.getenv("DISABLE_AI_IN_LIVE", "true").lower() == "true"
 
     # ------------------------------------------------------------------
     # 安全校验（Phase 7.7）

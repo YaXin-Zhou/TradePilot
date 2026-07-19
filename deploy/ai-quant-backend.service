@@ -1,0 +1,30 @@
+# AI Quant Trade — Backend systemd unit (Linux 部署用)
+# 安装: sudo cp ai-quant-backend.service /etc/systemd/system/
+# 启动: sudo systemctl daemon-reload && sudo systemctl enable --now ai-quant-backend
+# 查看日志: journalctl -u ai-quant-backend -f
+
+[Unit]
+Description=AI Quant Trade Backend (FastAPI)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/ai-quant-trade/backend
+EnvironmentFile=/opt/ai-quant-trade/backend/.env
+ExecStart=/opt/ai-quant-trade/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# 安全限制
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/ai-quant-trade/backend/data /opt/ai-quant-trade/backend/logs
+
+[Install]
+WantedBy=multi-user.target

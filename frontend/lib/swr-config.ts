@@ -52,3 +52,8 @@ export function useTradeHistory(limit: number = 20) {
 export function useExchangeStatus() {
   return useMarketData(() => api.getExchangeStatus(), "exchange:status", 30000);
 }
+
+/** Phase 8: 紧急停止状态（5s 轮询，触发了要立刻感知） */
+export function useKillSwitch() {
+  return useMarketData(() => api.getKillSwitchStatus(), "kill-switch", 5000);
+}

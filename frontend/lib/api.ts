@@ -61,7 +61,7 @@ export const api = {
   getBalance: () => request("/api/trading/balance"),
   getOpenOrders: (symbol = "BTC/USDT") =>
     request(`/api/trading/open-orders?symbol=${encodeURIComponent(symbol)}`),
-  placeLimitOrder: (data: { symbol: string; side: string; amount: number; price: number }) =>
+  placeLimitOrder: (data: { symbol: string; side: string; amount: number; price: number; confirm_live?: boolean }) =>
     request("/api/trading/limit-order", {
       method: "POST",
       body: JSON.stringify(data),
@@ -71,10 +71,25 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ order_id: orderId, symbol }),
     }),
-  placeMarketOrder: (data: { symbol?: string; side: string; amount: number }) =>
+  cancelAllOrders: (symbol = "") =>
+    request(`/api/trading/cancel-all?symbol=${encodeURIComponent(symbol)}`, { method: "POST" }),
+  placeMarketOrder: (data: { symbol?: string; side: string; amount: number; confirm_live?: boolean }) =>
     request("/api/trading/market-order", {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  // Phase 8: 紧急停止（Kill Switch）
+  getKillSwitchStatus: () => request("/api/trading/kill-switch"),
+  emergencyStop: (reason = "", confirm = false) =>
+    request("/api/trading/emergency-stop", {
+      method: "POST",
+      body: JSON.stringify({ reason, confirm }),
+    }),
+  emergencyReset: (confirm = false) =>
+    request("/api/trading/emergency-reset", {
+      method: "POST",
+      body: JSON.stringify({ confirm }),
     }),
 
   // Portfolio

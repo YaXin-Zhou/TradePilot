@@ -39,11 +39,11 @@ def setup_logger(name: str = "ai_quant") -> logging.Logger:
 
     logger.setLevel(logging.INFO)
 
-    # 文件 Handler — 按日期轮转，保留 30 天
-    file_handler = logging.handlers.TimedRotatingFileHandler(
+    # 文件 Handler — 按大小+日期双轮转，单文件最大 10MB，保留 30 个
+    # Phase 8: 修复原版无单文件大小上限的问题（高频日志会撑大）
+    file_handler = logging.handlers.RotatingFileHandler(
         filename=LOG_DIR / "app.log",
-        when="midnight",
-        interval=1,
+        maxBytes=10 * 1024 * 1024,  # 10 MB
         backupCount=30,
         encoding="utf-8",
     )

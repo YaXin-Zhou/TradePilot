@@ -1,7 +1,9 @@
-"""集成测试 — 下单 → 风控 → 成交 全链路（Phase 7.6）
+"""集成测试 — 下单 → 风控 → 成交 全链路（Phase 8 更新版）
 
-验证 trading_service 正确接入 regime_detector + risk_engine：
-  place_market_order → _enhanced_risk_check → _detect_regime → risk_engine.full_check → create_market_order
+Phase 8 改动适配：
+  - 金额硬上限 MAX_ORDER_AMOUNT_USDT=200，测试金额改为 ≤200
+  - 移除 mock fallback，下单失败返回错误（不再返回假单）
+  - 实盘模式需 confirm_live（测试默认 testnet=true 不受影响）
 """
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -38,7 +40,6 @@ def uptrend_regime():
         volatility_percentile=0.6,
         price=50000.0,
     )
-    # _detect_regime 先调 fetch_ohlcv 再调 detect，两者都要 mock
     df = pd.DataFrame({
         "timestamp": pd.date_range("2026-01-01", periods=60, freq="1h", tz="UTC"),
         "open": [40000 + i * 200 for i in range(60)],
@@ -65,24 +66,25 @@ class TestTradingServiceIntegration:
 
     @pytest.mark.asyncio
     async def test_market_order_full_chain_passes_risk(self, uptrend_regime, mock_balance):
-        """市价单全链路：风控通过 → 下单成功"""
-        # risk_engine.full_check 在 TRENDING_UP + CUSTOM + sharpe=999 应通过
+        """市价单全链路：风控通过 → 下单成功（Phase 8: 金额 ≤ 200 USDT 硬上限）"""
+        # 0.001 BTC × 50000 = 50 USDT < 200 硬上限
         with patch.object(trading_service.shared_exchange, "fetch_ticker",
                           return_value={"last": 50000}), \
              patch.object(trading_service.shared_exchange, "create_market_order",
-                          return_value={"id": "ord123", "status": "closed", "amount": 0.01}):
+                          return_value={"id": "ord123", "status": "closed", "amount": 0.001}), \
+             patch.object(trading_service.shared_exchange, "fetch_order",
+                          return_value={"id": "ord123", "filled": 0.001, "status": "closed"}):
             order, err, is_mock = await trading_service.place_market_order(
-                "user1", "BTC/USDT", "buy", 0.01
+                "user1", "BTC/USDT", "buy", 0.001
             )
         assert err is None
         assert order["id"] == "ord123"
         assert is_mock is False
 
     @pytest.mark.asyncio
-    async def test_market_order_blocked_by_risk(self, uptrend_regime, mock_balance):
-        """市价单金额超限 → 风控拦截 → 不下单"""
-        # TRENDING_UP max_position_pct=0.40 → max 4000 USDT
-        # 100 BTC × 50000 = 5,000,000 USDT 远超 4000
+    async def test_market_order_blocked_by_hard_limit(self, uptrend_regime, mock_balance):
+        """Phase 8: 金额超硬上限(200) → 拦截 → 不下单"""
+        # 100 BTC × 50000 = 5,000,000 USDT 远超 200 硬上限
         with patch.object(trading_service.shared_exchange, "fetch_ticker",
                           return_value={"last": 50000}), \
              patch.object(trading_service.shared_exchange, "create_market_order") as mock_order:
@@ -91,62 +93,70 @@ class TestTradingServiceIntegration:
             )
         assert order is None
         assert err is not None
-        assert "RiskEngine" in err or "exceeds" in err.lower() or "position" in err.lower()
+        assert "硬上限" in err or "exceeds" in err.lower()
         mock_order.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_limit_order_full_chain(self, uptrend_regime, mock_balance):
-        """限价单全链路：风控通过 → 下单成功"""
-        # 0.01 BTC × 50000 = 500 USDT < 4000 限额
+        """限价单全链路：风控通过 → 下单成功（Phase 8: 金额 ≤ 200 硬上限）"""
+        # 0.001 BTC × 50000 = 50 USDT < 200 硬上限
         with patch.object(trading_service.shared_exchange, "create_limit_order",
-                          return_value={"id": "lim456", "status": "open"}):
+                          return_value={"id": "lim456", "status": "open"}), \
+             patch.object(trading_service.shared_exchange, "fetch_order",
+                          return_value={"id": "lim456", "filled": 0, "status": "open"}):
             order, err, is_mock = await trading_service.place_limit_order(
-                "user1", "BTC/USDT", "buy", 0.01, 50000
+                "user1", "BTC/USDT", "buy", 0.001, 50000
             )
         assert err is None
         assert order["id"] == "lim456"
 
     @pytest.mark.asyncio
     async def test_zero_amount_rejected(self, uptrend_regime, mock_balance):
-        """零金额下单被拦截"""
-        order, err, is_mock = await trading_service.place_market_order(
-            "user1", "BTC/USDT", "buy", 0
-        )
+        """零金额下单被拦截（Phase 8: 金额上限检查在风控前）"""
+        with patch.object(trading_service.shared_exchange, "fetch_ticker",
+                          return_value={"last": 50000}):
+            order, err, is_mock = await trading_service.place_market_order(
+                "user1", "BTC/USDT", "buy", 0
+            )
         assert order is None
-        assert "positive" in err.lower()
+        assert err is not None
+        assert "positive" in err.lower() or "金额" in err or "amount" in err.lower()
 
     @pytest.mark.asyncio
     async def test_regime_detect_fallback_on_error(self, mock_balance):
         """regime detect 异常 → 回退 RANGING_LOW_VOL → 仍走 risk_engine"""
-        # fetch_ohlcv 抛异常 → _detect_regime 返回 RANGING_LOW_VOL
         with patch.object(trading_service.shared_exchange, "fetch_ohlcv",
                           side_effect=RuntimeError("network")), \
              patch.object(trading_service.shared_exchange, "fetch_ticker",
                           return_value={"last": 50000}), \
              patch.object(trading_service.shared_exchange, "create_market_order",
                           return_value={"id": "ok", "status": "closed"}):
+            # 0.0001 BTC × 50000 = 5 USDT < 200 硬上限
             # RANGING_LOW_VOL allowed=[grid, ma_cross], CUSTOM 不在 → 被拦截
             order, err, is_mock = await trading_service.place_market_order(
-                "user1", "BTC/USDT", "buy", 0.001
+                "user1", "BTC/USDT", "buy", 0.0001
             )
         # CUSTOM 在 RANGING_LOW_VOL 被 regime_allowed 拦截
         assert order is None
         assert err is not None
 
     @pytest.mark.asyncio
-    async def test_mock_fallback_on_order_exception(self, uptrend_regime, mock_balance):
-        """下单异常 → mock 回退"""
+    async def test_order_exception_returns_error_not_mock(self, uptrend_regime, mock_balance):
+        """Phase 8: 下单异常 → 返回错误（不再 mock 回退）"""
+        from core.exchange import ExchangeError
         with patch.object(trading_service.shared_exchange, "fetch_ticker",
                           return_value={"last": 50000}), \
              patch.object(trading_service.shared_exchange, "create_market_order",
-                          side_effect=RuntimeError("exchange down")):
+                          side_effect=ExchangeError("exchange down")):
+            # 0.001 BTC × 50000 = 50 USDT < 200 硬上限
             order, err, is_mock = await trading_service.place_market_order(
                 "user1", "BTC/USDT", "buy", 0.001
             )
-        # 风控通过但下单失败 → mock 回退
-        assert order is not None
-        assert is_mock is True
-        assert err is None
+        # Phase 8: 下单失败返回错误，不再返回 mock 假单
+        assert order is None
+        assert err is not None
+        assert is_mock is False
+        assert "失败" in err or "failed" in err.lower()
 
     @pytest.mark.asyncio
     async def test_total_capital_from_balance(self, uptrend_regime):
@@ -158,12 +168,38 @@ class TestTradingServiceIntegration:
 
     @pytest.mark.asyncio
     async def test_enhanced_risk_check_uses_regime(self, uptrend_regime, mock_balance):
-        """_enhanced_risk_check 正确调用 regime_detector 和 risk_engine"""
+        """_enhanced_risk_check 正确调用 regime_detector 和 risk_engine（Phase 8: 金额 ≤ 200）"""
         with patch.object(trading_service.shared_exchange, "fetch_ticker",
                           return_value={"last": 50000}):
-            # 500 USDT 在 TRENDING_UP (max 4000) 通过
+            # 100 USDT < 200 硬上限，在 TRENDING_UP (max 4000) 通过
             ok, msg = await trading_service._enhanced_risk_check(
-                "user1", "BTC/USDT", "buy", 500
+                "user1", "BTC/USDT", "buy", 100
             )
         assert ok is True
         assert msg == ""
+
+    @pytest.mark.asyncio
+    async def test_kill_switch_blocks_order(self, uptrend_regime, mock_balance):
+        """Phase 8: kill_switch 触发时拒绝下单"""
+        from core.kill_switch import kill_switch
+        # 触发
+        kill_switch.trigger(by="test", reason="unit test")
+        try:
+            with patch.object(trading_service.shared_exchange, "fetch_ticker",
+                              return_value={"last": 50000}):
+                ok, msg = await trading_service._enhanced_risk_check(
+                    "user1", "BTC/USDT", "buy", 50
+                )
+            assert ok is False
+            assert "KILL_SWITCH" in msg or "紧急停止" in msg
+        finally:
+            kill_switch.reset()
+
+    @pytest.mark.asyncio
+    async def test_cancel_order_actually_cancels(self, uptrend_regime, mock_balance):
+        """Phase 8: cancel_order 真正调用交易所撤单"""
+        with patch.object(trading_service.shared_exchange, "cancel_order",
+                          return_value=True) as mock_cancel:
+            ok, msg = await trading_service.cancel_order("ord123", "BTC/USDT")
+        assert ok is True
+        mock_cancel.assert_called_once_with("ord123", "BTC/USDT")
