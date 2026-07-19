@@ -203,6 +203,13 @@ export const api = {
   testConnection: (data: { mode: "testnet" | "live"; api_key?: string; secret?: string; passphrase?: string }) =>
     request("/api/settings/exchange/test", { method: "POST", body: JSON.stringify(data) }),
 
+  // Settings - DeepSeek API Key
+  getDeepSeekSettings: () => request("/api/settings/deepseek"),
+  saveDeepSeekSettings: (data: { api_key: string }) =>
+    request("/api/settings/deepseek", { method: "POST", body: JSON.stringify(data) }),
+  testDeepSeekConnection: (data: { api_key: string }) =>
+    request("/api/settings/deepseek/test", { method: "POST", body: JSON.stringify(data) }),
+
   // Exchange
   getExchangeStatus: () => request("/api/exchange/status"),
 

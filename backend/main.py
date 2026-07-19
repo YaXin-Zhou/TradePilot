@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from db.database import init_db, close_db, async_session
 from tasks.scheduler import start_scheduler, stop_scheduler
-from load_db_config import load_exchange_config
+from load_db_config import load_exchange_config, load_deepseek_config
 from core.rate_limiter import rate_limit_middleware
 from core.errors import global_error_handler, sanitize_exception_handler
 from core.logger import log
@@ -35,6 +35,7 @@ async def lifespan(app: FastAPI):
 
     await init_db()
     await load_exchange_config()
+    await load_deepseek_config()
 
     # Phase 8: kill_switch 状态检查
     if kill_switch.is_triggered:

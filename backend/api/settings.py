@@ -8,6 +8,7 @@ Phase 8.1 改动：
   - 向后兼容：自动迁移旧版单配置数据为 testnet 配置
 """
 import json
+import httpx
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -396,3 +397,119 @@ async def test_exchange_config(
     is_testnet = (mode == "testnet")
     ok, msg = _verify_api_key_permissions(req.api_key, req.secret, req.passphrase, is_testnet)
     return {"success": ok, "data": {"message": msg, "mode": mode, "testnet": is_testnet}}
+
+
+# ---------------------------------------------------------------------------
+# DeepSeek API Key 配置
+# ---------------------------------------------------------------------------
+
+DEEPSEEK_CONFIG_KEY = "deepseek_settings"
+
+
+class DeepSeekConfigRequest(BaseModel):
+    """DeepSeek API Key 保存/测试请求。"""
+    api_key: str = ""
+
+
+async def _read_deepseek_config() -> dict:
+    """读取 DeepSeek 配置 JSON。"""
+    async with async_session() as session:
+        r = await session.execute(
+            select(AppConfig).where(AppConfig.key == DEEPSEEK_CONFIG_KEY)
+        )
+        row = r.scalar_one_or_none()
+        if not row or not row.value:
+            return {}
+        try:
+            return json.loads(row.value)
+        except json.JSONDecodeError:
+            return {}
+
+
+async def _write_deepseek_config(data: dict):
+    async with async_session() as session:
+        r = await session.execute(
+            select(AppConfig).where(AppConfig.key == DEEPSEEK_CONFIG_KEY)
+        )
+        row = r.scalar_one_or_none()
+        value = json.dumps(data)
+        if row:
+            row.value = value
+        else:
+            session.add(AppConfig(key=DEEPSEEK_CONFIG_KEY, value=value))
+        await session.commit()
+
+
+def _test_deepseek_key(api_key: str) -> tuple[bool, str]:
+    """测试 DeepSeek API Key 是否有效（发一个 ping 请求）。"""
+    if not api_key:
+        return False, "请提供 DeepSeek API Key"
+    try:
+        proxy = global_settings.HTTPS_PROXY or global_settings.HTTP_PROXY
+        with httpx.Client(timeout=15, proxy=proxy if proxy else None) as client:
+            resp = client.post(
+                "https://api.deepseek.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={"model": "deepseek-chat", "messages": [{"role": "user", "content": "ping"}], "max_tokens": 5},
+            )
+            if resp.status_code == 200:
+                return True, "DeepSeek API Key 有效，连接成功"
+            return False, f"DeepSeek 返回 {resp.status_code}: {resp.text[:120]}"
+    except Exception as e:
+        return False, f"连接失败: {e}"
+
+
+@router.get("/deepseek")
+async def get_deepseek_config(_user: dict = Depends(get_current_user)):
+    """返回 DeepSeek API Key 配置状态（脱敏）"""
+    data = await _read_deepseek_config()
+    api_key_enc = data.get("api_key_enc", "")
+    api_key = decrypt(api_key_enc) if api_key_enc else ""
+    return {
+        "success": True,
+        "data": {
+            "has_key": bool(api_key),
+            "api_key": mask_sensitive(api_key) if api_key else "",
+            "source": "DB" if api_key else (".env" if global_settings.DEEPSEEK_API_KEY else "未配置"),
+        },
+    }
+
+
+@router.post("/deepseek")
+async def save_deepseek_config(
+    req: DeepSeekConfigRequest,
+    _user: dict = Depends(get_current_user),
+):
+    """保存 DeepSeek API Key（加密存 DB + 热更新全局 settings）"""
+    if not req.api_key:
+        return {"success": False, "error": "请提供 DeepSeek API Key"}
+
+    # 可选：保存前测试一次（失败仍允许保存，仅警告）
+    test_ok, test_msg = _test_deepseek_key(req.api_key)
+
+    # 加密存储
+    await _write_deepseek_config({"api_key_enc": encrypt(req.api_key)})
+
+    # 热更新全局 settings，所有使用方立即生效
+    global_settings.DEEPSEEK_API_KEY = req.api_key
+    log.info("DeepSeek API Key updated and saved to DB")
+
+    return {
+        "success": True,
+        "data": {
+            "saved": True,
+            "test_ok": test_ok,
+            "test_msg": test_msg,
+            "source": "DB",
+        },
+    }
+
+
+@router.post("/deepseek/test")
+async def test_deepseek_config(
+    req: DeepSeekConfigRequest,
+    _user: dict = Depends(get_current_user),
+):
+    """测试 DeepSeek API Key（不保存）"""
+    ok, msg = _test_deepseek_key(req.api_key)
+    return {"success": ok, "data": {"message": msg}}

@@ -95,3 +95,36 @@ async def load_exchange_config():
             log.info(f"Exchange config in DB has no {'testnet' if active=='testnet' else 'live'} creds, using .env defaults")
     except Exception as e:
         log.warning(f"Load exchange config from DB skipped: {e}")
+
+
+async def load_deepseek_config():
+    """启动时从 DB 加载 DeepSeek API Key，覆盖 settings.DEEPSEEK_API_KEY。
+
+    若 DB 无配置则保留 .env 的值。所有 DeepSeek 使用方
+    (ai_service / ai_iterator / news_sentiment / ai_heartbeat) 均从
+    settings.DEEPSEEK_API_KEY 读取，此处统一注入。
+    """
+    try:
+        async with async_session() as session:
+            r = await session.execute(
+                select(AppConfig).where(AppConfig.key == "deepseek_settings")
+            )
+            row = r.scalar_one_or_none()
+            if not row or not row.value:
+                log.info("No DeepSeek config in DB, using .env DEEPSEEK_API_KEY")
+                return
+            try:
+                data = json.loads(row.value)
+            except json.JSONDecodeError:
+                log.warning("DB deepseek_settings JSON invalid, using .env defaults")
+                return
+
+        api_key_enc = data.get("api_key_enc", "")
+        api_key = decrypt(api_key_enc) if api_key_enc else ""
+        if api_key:
+            _s.DEEPSEEK_API_KEY = api_key
+            log.info("DeepSeek API Key loaded from DB")
+        else:
+            log.info("DeepSeek config in DB has no key, using .env defaults")
+    except Exception as e:
+        log.warning(f"Load DeepSeek config from DB skipped: {e}")

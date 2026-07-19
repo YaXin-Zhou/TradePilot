@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLanguage } from "../lib/LanguageContext";
 import { api } from "../lib/api";
-import { Save, Key, Database, Shield, RefreshCw, FlaskConical, AlertTriangle, CheckCircle2, Power } from "lucide-react";
+import { Save, Key, Database, Shield, RefreshCw, FlaskConical, AlertTriangle, CheckCircle2, Power, Brain } from "lucide-react";
 
 type Mode = "testnet" | "live";
 
@@ -32,6 +32,14 @@ export default function SettingsPage() {
   const [testResult, setTestResult] = useState<null | { ok: boolean; msg: string }>(null);
   const [switching, setSwitching] = useState(false);
   const [switchMsg, setSwitchMsg] = useState<null | { ok: boolean; msg: string }>(null);
+
+  // DeepSeek API Key
+  const [dsKey, setDsKey] = useState("");
+  const [dsStatus, setDsStatus] = useState<null | { has_key: boolean; api_key: string; source: string }>(null);
+  const [dsSaving, setDsSaving] = useState(false);
+  const [dsTesting, setDsTesting] = useState(false);
+  const [dsMsg, setDsMsg] = useState<null | { ok: boolean; msg: string }>(null);
+
   const { t } = useLanguage();
 
   const loadSettings = async () => {
@@ -48,8 +56,47 @@ export default function SettingsPage() {
     }
   };
 
+  const loadDeepSeek = async () => {
+    try {
+      const data: any = await api.getDeepSeekSettings();
+      setDsStatus(data);
+      if (data?.has_key) setDsKey(data.api_key);
+    } catch (e) {
+      console.error("Load DeepSeek settings failed", e);
+    }
+  };
+
+  const saveDeepSeek = async () => {
+    if (!dsKey) { setDsMsg({ ok: false, msg: t("settings.dsKeyRequired") }); return; }
+    setDsSaving(true);
+    setDsMsg(null);
+    try {
+      const res: any = await api.saveDeepSeekSettings({ api_key: dsKey });
+      setDsMsg({ ok: res?.test_ok !== false, msg: res?.test_msg || t("settings.saved") });
+      await loadDeepSeek();
+    } catch (e: any) {
+      setDsMsg({ ok: false, msg: e.message || "Save failed" });
+    }
+    setDsSaving(false);
+    setTimeout(() => setDsMsg(null), 4000);
+  };
+
+  const testDeepSeek = async () => {
+    if (!dsKey) { setDsMsg({ ok: false, msg: t("settings.dsKeyRequired") }); return; }
+    setDsTesting(true);
+    setDsMsg(null);
+    try {
+      const res: any = await api.testDeepSeekConnection({ api_key: dsKey });
+      setDsMsg({ ok: res.success !== false, msg: res?.data?.message || res?.error || (res.success ? t("settings.testOk") : "Failed") });
+    } catch (e: any) {
+      setDsMsg({ ok: false, msg: e.message || "Connection failed" });
+    }
+    setDsTesting(false);
+  };
+
   useEffect(() => {
     loadSettings();
+    loadDeepSeek();
   }, []);
 
   const currentForm = activeTab === "testnet" ? testnetForm : liveForm;
@@ -242,6 +289,61 @@ export default function SettingsPage() {
               {switchMsg.msg}
             </div>
           )}
+        </div>
+      </div>
+
+      {/* DeepSeek AI Key 配置 */}
+      <div className="card">
+        <div className="flex items-center gap-2 mb-4">
+          <Brain size={16} className="text-purple-400" />
+          <h3 className="text-sm font-semibold text-white">{t("settings.deepseek")}</h3>
+          {dsStatus?.has_key && (
+            <span className="px-1.5 py-0.5 rounded bg-okx-green/20 text-okx-green text-[10px] font-semibold flex items-center gap-1">
+              <CheckCircle2 size={10} /> {t("settings.configured")}
+            </span>
+          )}
+        </div>
+
+        <div className="mb-4 flex items-center gap-2 text-xs">
+          <span className="text-dark-400">{t("settings.dsStatus")}:</span>
+          <span className={dsStatus?.has_key ? "text-okx-green" : "text-dark-500"}>
+            {dsStatus?.has_key ? t("settings.configured") : t("settings.noKey")}
+          </span>
+          {dsStatus?.source && (
+            <span className="px-1.5 py-0.5 rounded bg-dark-700 text-dark-300 text-[10px]">{dsStatus.source}</span>
+          )}
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="text-xs text-dark-400 block mb-1">{t("settings.dsApiKey")}</label>
+            <input
+              type="password"
+              value={dsKey}
+              onChange={(e) => setDsKey(e.target.value)}
+              placeholder={dsStatus?.has_key ? dsStatus.api_key : "sk-xxxxxxxxxxxxxxxx"}
+              className="w-full"
+            />
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button onClick={saveDeepSeek} disabled={dsSaving} className="btn-primary flex items-center gap-2 text-sm">
+              <Save size={15} /> {dsSaving ? "..." : t("settings.save")}
+            </button>
+            <button onClick={testDeepSeek} disabled={dsTesting} className="btn-ghost flex items-center gap-2 text-sm">
+              <RefreshCw size={15} className={dsTesting ? "animate-spin" : ""} /> {t("settings.testConn")}
+            </button>
+          </div>
+
+          {dsMsg && (
+            <div className={`text-xs p-2 rounded ${dsMsg.ok ? "bg-okx-green/10 text-okx-green" : "bg-okx-red/10 text-okx-red"}`}>
+              {dsMsg.msg}
+            </div>
+          )}
+
+          <p className="text-xs text-dark-500">
+            {t("settings.dsHint")} <span className="text-okx-blue">https://platform.deepseek.com/api_keys</span>
+          </p>
         </div>
       </div>
 
