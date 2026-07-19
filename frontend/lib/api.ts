@@ -124,6 +124,32 @@ export const api = {
     }),
   getMarketRegime: (symbol = "BTC/USDT", timeframe = "1h") =>
     request(`/api/analysis/market-regime?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}`),
+  // Risk Engine
+  getRiskPolicies: () => request("/api/analysis/risk-policies"),
+  updateRiskPolicy: (data: {
+    regime: string;
+    max_position_pct?: number;
+    max_single_strategy_pct?: number;
+    max_daily_loss_pct?: number;
+    stop_loss_pct?: number;
+    trailing_stop_pct?: number;
+    min_sharpe_entry?: number;
+    max_correlation?: number;
+    time_stop_hours?: number;
+    atr_stop_multiplier?: number;
+    allowed_strategies?: string[];
+  }) => request("/api/analysis/risk-policies", { method: "POST", body: JSON.stringify(data) }),
+  resetRiskPolicies: () => request("/api/analysis/risk-policies/reset", { method: "POST" }),
+  checkRisk: (data: {
+    regime: string;
+    strategy_type: string;
+    sharpe_oos: number;
+    total_capital: number;
+    current_position?: number;
+    new_amount?: number;
+    strategy_position?: number;
+    daily_pnl?: number;
+  }) => request("/api/analysis/risk-check", { method: "POST", body: JSON.stringify(data) }),
   // Backtest
   runBacktest: (data: { strategy: string; symbol?: string; timeframe?: string; limit?: number; capital?: number; position_size?: number; trading_fee?: number; slippage?: number; params?: any }) =>
     request("/api/backtest/run", { method: "POST", body: JSON.stringify(data) }),
