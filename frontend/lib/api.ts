@@ -89,6 +89,10 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(data),
     }),
+  startStrategy: (id: string) =>
+    request(`/api/strategies/${id}/start`, { method: "POST" }),
+  stopStrategy: (id: string) =>
+    request(`/api/strategies/${id}/stop`, { method: "POST" }),
   deleteStrategy: (id: string) =>
     request(`/api/strategies/${id}`, { method: "DELETE" }),
 
@@ -132,4 +136,6 @@ export const api = {
   register: (username: string, password: string, email?: string) =>
     request("/api/auth/register", { method: "POST", body: JSON.stringify({ username, password, email }) }),
 };
+
+
 

@@ -28,7 +28,7 @@ export default function StrategiesPage() {
     load();
   };
 
-  const deleteStrategy = async (id: string) => { await api.deleteStrategy(id); load(); };
+  const deleteStrategy = async (id: string) => { await api.stopStrategy(id).catch(()=>{}); await api.deleteStrategy(id); load(); };
 
   return (
     <div className="space-y-6">
@@ -105,4 +105,5 @@ export default function StrategiesPage() {
     </div>
   );
 }
+
 
