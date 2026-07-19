@@ -4,6 +4,7 @@ from sqlalchemy import select
 from db.database import async_session
 from db.models import AppConfig
 from core.crypto import decrypt
+from core.logger import log
 
 
 async def load_exchange_config():
@@ -32,6 +33,6 @@ async def load_exchange_config():
                     import core.exchange as exmod
                     exmod.shared_exchange = client
                     client._last_attempt = 0
-                    print("Loaded exchange config from DB (will reconnect on next request)")
+                    log.info("Exchange config loaded from DB")
     except Exception as e:
-        print(f"Load config skipped: {e}")
+        log.warning(f"Load exchange config from DB skipped: {e}")

@@ -1,7 +1,10 @@
 """密钥加密/解密模块 — 基于 Fernet (AES-128-CBC + HMAC)"""
 import os
 import base64
+import logging
 from cryptography.fernet import Fernet
+
+_log = logging.getLogger("ai_quant.crypto")
 
 
 def _generate_key() -> bytes:
@@ -25,7 +28,7 @@ def _load_or_create_key() -> bytes:
     env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
     _persist_key(env_path, new_key.decode())
     os.environ["ENCRYPTION_KEY"] = new_key.decode()
-    print(f"[crypto] Generated new encryption key, saved to .env")
+    _log.info("Generated new encryption key, saved to .env")
     return new_key
 
 

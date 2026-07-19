@@ -13,6 +13,8 @@ from db.database import init_db, close_db
 from tasks.scheduler import start_scheduler, stop_scheduler
 from load_db_config import load_exchange_config
 from core.rate_limiter import rate_limit_middleware
+from core.errors import global_error_handler, sanitize_exception_handler
+from core.logger import log
 
 
 @asynccontextmanager
@@ -21,11 +23,13 @@ async def lifespan(app: FastAPI):
     await load_exchange_config()
     try:
         start_scheduler()
+        log.info("Application started successfully")
     except Exception as e:
-        print(f"Scheduler start failed (non-fatal): {e}")
+        log.error(f"Scheduler start failed (non-fatal): {e}")
     yield
     stop_scheduler()
     await close_db()
+    log.info("Application shut down")
 
 
 app = FastAPI(
@@ -46,6 +50,12 @@ app.add_middleware(
 
 # 速率限制中间件
 app.middleware("http")(rate_limit_middleware)
+
+# 全局错误处理中间件
+app.middleware("http")(global_error_handler)
+
+# 兜底异常处理器
+app.add_exception_handler(Exception, sanitize_exception_handler)
 
 # 注册路由
 from api.market import router as market_router

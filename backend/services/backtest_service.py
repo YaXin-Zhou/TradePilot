@@ -1,0 +1,180 @@
+"""回测服务层"""
+import json
+import time as timemod
+import pathlib
+import pandas as pd
+import random
+from core.exchange import shared_exchange, ExchangeClient
+from config import settings
+from strategies.backtest import BacktestEngine
+from core.logger import log
+
+# 独立的 exchange 客户端（回测用，避免抢占 shared_exchange）
+_backtest_exchange = ExchangeClient(
+    exchange_name=settings.EXCHANGE_NAME,
+    api_key=settings.EXCHANGE_API_KEY,
+    secret=settings.EXCHANGE_SECRET,
+    passphrase=settings.EXCHANGE_PASSPHRASE,
+    testnet=settings.EXCHANGE_TESTNET,
+)
+
+HISTORY_DIR = pathlib.Path(__file__).parent.parent / "data"
+HISTORY_FILE = HISTORY_DIR / "backtest_history.json"
+
+
+def _mock_ohlcv(count=500):
+    data = []
+    price = 85000
+    t = int(time.time() * 1000) - count * 3600000
+    for i in range(count):
+        change = random.uniform(-400, 400)
+        vol = random.uniform(50, 200)
+        data.append({
+            "timestamp": t / 1000,
+            "open": price,
+            "high": price + abs(change) + random.uniform(10, 50),
+            "low": price - abs(change) - random.uniform(10, 50),
+            "close": price + change,
+            "volume": vol,
+            "symbol": "BTC/USDT",
+        })
+        price += change * 0.3
+        price = max(price, 50000)
+        price = min(price, 120000)
+        t += 3600000
+    return data
+
+
+def _to_df(ohlcv_data: list) -> pd.DataFrame:
+    df = pd.DataFrame(ohlcv_data)
+    ts_col = "timestamp"
+    if ts_col in df.columns:
+        df[ts_col] = pd.to_datetime(df[ts_col], unit="s", utc=True)
+    for c in ["open", "high", "low", "close", "volume"]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+    return df
+
+
+def fetch_ohlcv(symbol: str, timeframe: str, limit: int) -> tuple[pd.DataFrame, bool]:
+    """获取回测数据。返回 (df, is_mock)"""
+    try:
+        df = _backtest_exchange.fetch_ohlcv(symbol, timeframe, limit)
+        if df is not None and len(df) > 0:
+            return df, False
+    except Exception as e:
+        log.warning(f"Backtest OHLCV fetch failed: {e}")
+
+    raw = _mock_ohlcv(limit)
+    return _to_df(raw), True
+
+
+def run_backtest(
+    ohlcv_df: pd.DataFrame,
+    strategy_type: str,
+    capital: float,
+    params: dict,
+    position_size_pct: float = 0.95,
+    trading_fee_pct: float = 0.001,
+    slippage_pct: float = 0.001,
+) -> dict:
+    """执行回测。返回结果字典"""
+    if ohlcv_df is None or len(ohlcv_df) < 30:
+        raise ValueError(f"Not enough data for backtest: {len(ohlcv_df) if ohlcv_df is not None else 0} bars")
+
+    engine = BacktestEngine(
+        ohlcv_df, capital,
+        position_size_pct=position_size_pct,
+        trading_fee_pct=trading_fee_pct,
+        slippage_pct=slippage_pct,
+    )
+
+    if strategy_type == "ma_crossover":
+        fast = int(params.get("fast", 10))
+        slow = int(params.get("slow", 30))
+        result = engine.run_ma_crossover(fast, slow)
+    elif strategy_type == "rsi":
+        period = int(params.get("period", 14))
+        oversold = int(params.get("oversold", 30))
+        overbought = int(params.get("overbought", 70))
+        result = engine.run_rsi(period, oversold, overbought)
+    elif strategy_type == "bollinger":
+        period = int(params.get("period", 20))
+        std_dev = float(params.get("std_dev", 2.0))
+        result = engine.run_bollinger(period, std_dev)
+    else:
+        raise ValueError(f"Unknown strategy: {strategy_type}")
+
+    return {
+        "symbol": result.symbol,
+        "bars": result.bars,
+        "strategy_name": result.strategy_name,
+        "strategy_params": result.strategy_params,
+        "initial_capital": result.initial_capital,
+        "final_capital": result.final_capital,
+        "total_return": result.total_return,
+        "total_return_pct": result.total_return_pct,
+        "total_fees": result.total_fees,
+        "sharpe_ratio": result.sharpe_ratio,
+        "max_drawdown": result.max_drawdown,
+        "max_drawdown_pct": result.max_drawdown_pct,
+        "win_rate": result.win_rate,
+        "total_trades": result.total_trades,
+        "winning_trades": result.winning_trades,
+        "losing_trades": result.losing_trades,
+        "avg_win": result.avg_win,
+        "avg_loss": result.avg_loss,
+        "profit_factor": result.profit_factor,
+        "trades": result.trades,
+        "equity_curve": result.equity_curve,
+    }
+
+
+def save_to_history(strategy_type: str, symbol: str, timeframe: str, capital: float, params: dict, result: dict):
+    """保存回测结果到历史文件"""
+    try:
+        HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+        records = []
+        if HISTORY_FILE.exists():
+            records = json.loads(HISTORY_FILE.read_text())
+        records.insert(0, {
+            "id": int(timemod.time()),
+            "strategy": strategy_type,
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "capital": capital,
+            "params": params,
+            "result": {k: (float(v) if isinstance(v, (int, float)) else v) for k, v in {
+                "total_return": result.get("total_return", 0),
+                "total_return_pct": result.get("total_return_pct", 0),
+                "sharpe_ratio": result.get("sharpe_ratio", 0),
+                "max_drawdown_pct": result.get("max_drawdown_pct", 0),
+                "win_rate": result.get("win_rate", 0),
+                "total_trades": result.get("total_trades", 0),
+                "profit_factor": result.get("profit_factor", 0),
+                "final_capital": result.get("final_capital", 0),
+            }.items()},
+            "created_at": timemod.strftime("%Y-%m-%d %H:%M:%S"),
+        })
+        HISTORY_FILE.write_text(json.dumps(records[:100], ensure_ascii=False, indent=2))
+    except Exception as e:
+        log.error(f"Failed to save backtest history: {e}")
+
+
+def get_history() -> list:
+    """获取回测历史"""
+    if not HISTORY_FILE.exists():
+        return []
+    try:
+        return json.loads(HISTORY_FILE.read_text())
+    except Exception:
+        return []
+
+
+def clear_history():
+    """清空回测历史"""
+    try:
+        HISTORY_FILE.write_text("[]")
+        return True
+    except Exception:
+        return False

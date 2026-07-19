@@ -3,6 +3,7 @@ import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from datetime import datetime, timezone
+from core.logger import log
 
 scheduler = AsyncIOScheduler()
 
@@ -35,8 +36,8 @@ async def sync_market_data():
                             "close": row["close"], "volume": row["volume"],
                         })
                     await session.commit()
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning(f"Market data sync failed for {s.symbol}: {e}")
 
 
 async def retrain_ml_models():
@@ -53,20 +54,23 @@ async def retrain_ml_models():
         symbols = set(s.symbol for s in result.scalars().all())
         for symbol in symbols:
             try:
+                log.info(f"Retraining ML model for {symbol}")
                 await asyncio.to_thread(train_model, symbol, "1h", 1000)
-            except Exception:
-                pass
+            except Exception as e:
+                log.error(f"ML retrain failed for {symbol}: {e}")
 
 
 def start_scheduler():
     scheduler.add_job(sync_market_data, IntervalTrigger(hours=1), id="sync_market_data", replace_existing=True)
     scheduler.add_job(retrain_ml_models, IntervalTrigger(hours=24), id="retrain_ml_models", replace_existing=True)
     scheduler.start()
+    log.info("Scheduler started (market data sync: 1h, ML retrain: 24h)")
 
 
 def stop_scheduler():
     try:
         scheduler.shutdown(wait=False)
+        log.info("Scheduler stopped")
     except Exception:
         pass
 

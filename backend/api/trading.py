@@ -1,20 +1,12 @@
-"""交易 API - 带模拟数据后备"""
+"""交易 API"""
 from fastapi import APIRouter, Depends
-from core.exchange import shared_exchange as _exchange
 from auth.deps import get_current_user
-from core.risk import risk_manager
 from config import settings
 from pydantic import BaseModel
-
-
-def _get_price(symbol: str) -> float:
-    try:
-        t = _exchange.fetch_ticker(symbol)
-        return t.get("last", 0) or 0
-    except Exception:
-        return 0
-
-import random, uuid
+from services.trading_service import (
+    get_balance, place_limit_order, place_market_order,
+    get_open_orders, get_trade_history,
+)
 
 router = APIRouter(prefix="/api/trading", tags=["trading"])
 
@@ -38,76 +30,58 @@ class MarketOrderRequest(BaseModel):
 
 
 @router.get("/balance")
-async def get_balance(_user: dict = Depends(get_current_user)):
-    try:
-        bal = _exchange.fetch_balance()
-        return {"success": True, "data": bal}
-    except Exception:
-        return {"success": True, "data": {
-            "USDT": {"free": 9850.42, "used": 150.00, "total": 10000.42},
-            "BTC": {"free": 0.1158, "used": 0.0150, "total": 0.1308},
-            "ETH": {"free": 2.5, "used": 0, "total": 2.5},
-        }, "_mock": True}
+async def api_get_balance(_user: dict = Depends(get_current_user)):
+    data, is_mock = await get_balance()
+    resp = {"success": True, "data": data}
+    if is_mock:
+        resp["_mock"] = True
+    return resp
 
 
 @router.post("/limit-order")
-async def place_limit_order(req: LimitOrderRequest, _user: dict = Depends(get_current_user)):
-    ok, msg = await risk_manager.check_order(_user.get("id", "system"), req.symbol, req.side, req.amount * req.price)
-    if not ok:
-        return {"success": False, "error": msg}
-    try:
-        order = _exchange.create_limit_order(req.symbol, req.side, req.amount, req.price)
-        return {"success": True, "data": order}
-    except Exception:
-        return {"success": True, "data": {
-            "id": str(uuid.uuid4())[:8],
-            "symbol": req.symbol,
-            "side": req.side,
-            "price": req.price,
-            "amount": req.amount,
-            "filled": 0,
-            "status": "open",
-        }, "_mock": True}
+async def api_limit_order(req: LimitOrderRequest, _user: dict = Depends(get_current_user)):
+    order, error, is_mock = await place_limit_order(
+        _user.get("id", "system"), req.symbol, req.side, req.amount, req.price
+    )
+    if error:
+        return {"success": False, "error": error}
+    resp = {"success": True, "data": order}
+    if is_mock:
+        resp["_mock"] = True
+    return resp
 
 
 @router.post("/cancel-order")
-async def cancel_order(req: CancelOrderRequest, _user: dict = Depends(get_current_user)):
+async def api_cancel_order(req: CancelOrderRequest, _user: dict = Depends(get_current_user)):
     return {"success": True}
 
 
 @router.post("/market-order")
-async def place_market_order(req: MarketOrderRequest, _user: dict = Depends(get_current_user)):
-    ok, msg = await risk_manager.check_order(_user.get("id", "system"), req.symbol, req.side, req.amount * _get_price(req.symbol))
-    if not ok:
-        return {"success": False, "error": msg}
-    try:
-        order = _exchange.create_market_order(req.symbol, req.side, req.amount)
-        return {"success": True, "data": order}
-    except Exception as e:
-        return {"success": True, "data": {
-            "id": str(uuid.uuid4())[:8],
-            "symbol": req.symbol,
-            "side": req.side,
-            "amount": req.amount,
-            "filled": req.amount,
-            "price": 0,
-            "status": "closed",
-        }, "_mock": True}
+async def api_market_order(req: MarketOrderRequest, _user: dict = Depends(get_current_user)):
+    order, error, is_mock = await place_market_order(
+        _user.get("id", "system"), req.symbol, req.side, req.amount
+    )
+    if error:
+        return {"success": False, "error": error}
+    resp = {"success": True, "data": order}
+    if is_mock:
+        resp["_mock"] = True
+    return resp
 
 
 @router.get("/open-orders")
-async def get_open_orders(symbol: str = settings.DEFAULT_SYMBOL, _user: dict = Depends(get_current_user)):
-    try:
-        orders = _exchange.fetch_open_orders(symbol)
-        return {"success": True, "data": orders}
-    except Exception:
-        return {"success": True, "data": [], "_mock": True}
+async def api_open_orders(symbol: str = settings.DEFAULT_SYMBOL, _user: dict = Depends(get_current_user)):
+    data, is_mock = get_open_orders(symbol)
+    resp = {"success": True, "data": data}
+    if is_mock:
+        resp["_mock"] = True
+    return resp
 
 
 @router.get("/trades")
-async def get_trades(symbol: str = settings.DEFAULT_SYMBOL, limit: int = 50, _user: dict = Depends(get_current_user)):
-    try:
-        trades = _exchange.fetch_my_trades(symbol, limit)
-        return {"success": True, "data": trades}
-    except Exception:
-        return {"success": True, "data": [], "_mock": True}
+async def api_trades(symbol: str = settings.DEFAULT_SYMBOL, limit: int = 50, _user: dict = Depends(get_current_user)):
+    data, is_mock = get_trade_history(symbol, limit)
+    resp = {"success": True, "data": data}
+    if is_mock:
+        resp["_mock"] = True
+    return resp
