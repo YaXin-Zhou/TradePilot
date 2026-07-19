@@ -19,6 +19,17 @@ const STRATEGIES = [
 const SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"];
 const TIMEFRAMES = ["1h", "4h", "1d"];
 
+/** 回测参数 — 不同策略使用不同字段子集 */
+interface BacktestParams {
+  fast?: number;
+  slow?: number;
+  period?: number;
+  oversold?: number;
+  overbought?: number;
+  std_dev?: number;
+  [key: string]: number | undefined;
+}
+
 function MetricCard({ icon: Icon, label, value, color, suffix }: any) {
   return (
     <div className="card">
@@ -50,7 +61,7 @@ export default function BacktestPage() {
   const [strategy, setStrategy] = useState("ma_crossover");
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<any>(null);
-  const [params, setParams] = useState<any>({ fast: 10, slow: 30 });
+  const [params, setParams] = useState<BacktestParams>({ fast: 10, slow: 30 });
 
   const runBacktest = async () => {
     setRunning(true);
