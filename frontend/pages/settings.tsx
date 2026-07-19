@@ -83,12 +83,12 @@ export default function SettingsPage() {
   };
 
   const testDeepSeek = async () => {
-    if (!dsKey) { setDsMsg({ ok: false, msg: t("settings.dsKeyRequired") }); return; }
     setDsTesting(true);
     setDsMsg(null);
     try {
+      // 空值时后端会从 DB 读已保存的 Key 测试（与 save 逻辑一致）
       const res: any = await api.testDeepSeekConnection({ api_key: dsKey });
-      setDsMsg({ ok: res.success !== false, msg: res?.data?.message || res?.error || (res.success ? t("settings.testOk") : "Failed") });
+      setDsMsg({ ok: res.success !== false, msg: res?.message || (res.success !== false ? t("settings.testOk") : "Failed") });
     } catch (e: any) {
       setDsMsg({ ok: false, msg: e.message || "Connection failed" });
     }
@@ -131,13 +131,14 @@ export default function SettingsPage() {
     setTesting(true);
     setTestResult(null);
     try {
+      // 空值时后端会从 DB 读已保存的 Key 测试（与 save 逻辑一致）
       const res: any = await api.testConnection({
         mode: activeTab,
         api_key: currentForm.api_key,
         secret: currentForm.secret,
         passphrase: currentForm.passphrase,
       });
-      setTestResult({ ok: res.success !== false, msg: res?.data?.message || res?.error || (res.success ? t("settings.testOk") : "Failed") });
+      setTestResult({ ok: res.success !== false, msg: res?.message || (res.success !== false ? t("settings.testOk") : "Failed") });
     } catch (e: any) {
       setTestResult({ ok: false, msg: e.message || "Connection failed" });
     }

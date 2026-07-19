@@ -404,13 +404,31 @@ async def test_exchange_config(
     req: ExchangeConfigRequest,
     _user: dict = Depends(get_current_user),
 ):
-    """测试连接 + 校验权限（不保存）"""
-    if not req.api_key or not req.secret:
-        return {"success": False, "error": "请提供完整的 API Key 和 Secret"}
+    """测试连接 + 校验权限（不保存）
 
+    如果某字段为空或为脱敏占位符（含 *），从 DB 读取已保存的明文值进行测试。
+    这样刷新页面后输入框为空也能测试已保存的 Key。
+    """
     mode = req.mode if req.mode in ("testnet", "live") else "testnet"
     is_testnet = (mode == "testnet")
-    ok, msg = _verify_api_key_permissions(req.api_key, req.secret, req.passphrase, is_testnet)
+
+    # 空值/脱敏值时从 DB 读原值（与 save 端点逻辑一致）
+    if _is_masked_or_empty(req.api_key) or _is_masked_or_empty(req.secret):
+        data = await _read_config_async()
+        creds = data.get(mode, {})
+        db_api_key, db_secret, db_passphrase = _get_creds_plaintext(creds)
+        if not db_api_key or not db_secret:
+            mode_label = "实盘" if mode == "live" else "模拟盘"
+            return {"success": False, "error": f"{mode_label}尚未配置 API Key，请先填写并保存"}
+        final_api_key = db_api_key
+        final_secret = db_secret
+        final_passphrase = db_passphrase if _is_masked_or_empty(req.passphrase) else req.passphrase
+    else:
+        final_api_key = req.api_key
+        final_secret = req.secret
+        final_passphrase = req.passphrase
+
+    ok, msg = _verify_api_key_permissions(final_api_key, final_secret, final_passphrase, is_testnet)
     return {"success": ok, "data": {"message": msg, "mode": mode, "testnet": is_testnet}}
 
 
@@ -539,6 +557,16 @@ async def test_deepseek_config(
     req: DeepSeekConfigRequest,
     _user: dict = Depends(get_current_user),
 ):
-    """测试 DeepSeek API Key（不保存）"""
-    ok, msg = _test_deepseek_key(req.api_key)
+    """测试 DeepSeek API Key（不保存）
+
+    如果 api_key 为空或为脱敏占位符（含 *），从 DB 读取已保存的明文值进行测试。
+    """
+    api_key = req.api_key
+    if _is_masked_or_empty(api_key):
+        existing = await _read_deepseek_config()
+        existing_key = decrypt(existing.get("api_key_enc", "")) if existing.get("api_key_enc") else ""
+        if not existing_key:
+            return {"success": False, "data": {"message": "尚未配置 DeepSeek API Key，请先填写并保存"}}
+        api_key = existing_key
+    ok, msg = _test_deepseek_key(api_key)
     return {"success": ok, "data": {"message": msg}}
