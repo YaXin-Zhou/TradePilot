@@ -85,27 +85,48 @@ class Settings:
     DISABLE_AI_IN_LIVE: bool = os.getenv("DISABLE_AI_IN_LIVE", "true").lower() == "true"
 
     # ------------------------------------------------------------------
-    # 安全校验（Phase 7.7）
+    # 安全校验（Phase 7.7 + P0-3 修复）
     # ------------------------------------------------------------------
 
-    JWT_DEFAULT_KEY: str = "ai_quant_jwt_secret_key_dev"
+    # P0-3: 弱密钥黑名单 — 任何已知弱密钥都拒绝（不只检查单一默认值）
+    WEAK_JWT_KEYS: set[str] = {
+        "ai_quant_jwt_secret_key_dev",
+        "ai_quant_jwt_secret_key_change_in_prod_2024",
+        "change_me",
+        "secret",
+        "changeme",
+        "",
+    }
+    JWT_MIN_LENGTH: int = 32  # 最少 32 字符
 
     def validate_security(self) -> list[str]:
         """启动时安全检查，返回告警列表（空=全部通过）。
 
-        生产模式（DEBUG=False）下使用默认 JWT 密钥 → 拒绝启动。
+        生产模式（DEBUG=False）下使用弱 JWT 密钥 → 拒绝启动。
+        弱密钥定义：在黑名单中 / 长度 < 32 字符 / 包含 "change" 或 "default"。
         """
         warnings: list[str] = []
+        key = self.JWT_SECRET_KEY
 
-        if self.JWT_SECRET_KEY == self.JWT_DEFAULT_KEY:
+        is_weak = (
+            key in self.WEAK_JWT_KEYS
+            or len(key) < self.JWT_MIN_LENGTH
+            or "change" in key.lower()
+            or "default" in key.lower()
+            or "your_" in key.lower()
+            or "todo" in key.lower()
+        )
+
+        if is_weak:
             if not self.DEBUG:
                 raise RuntimeError(
-                    "FATAL: JWT_SECRET_KEY 仍为默认值且非 DEBUG 模式。"
-                    "生产环境必须设置 JWT_SECRET_KEY 环境变量（>= 32 字符随机串）。"
+                    "FATAL: JWT_SECRET_KEY 为弱密钥（黑名单/过短/含 change|default|your_|todo），"
+                    "且非 DEBUG 模式。生产环境必须设置 >= 32 字符的强随机串。"
+                    "生成方法: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
                 )
             else:
                 warnings.append(
-                    "JWT_SECRET_KEY 使用默认值（仅开发模式允许，生产前必须设置环境变量）"
+                    "JWT_SECRET_KEY 为弱密钥（仅开发模式允许，生产前必须设置强随机串 >= 32 字符）"
                 )
 
         if self.ENCRYPTION_KEY == "" and not self.DEBUG:
