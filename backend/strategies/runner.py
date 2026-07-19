@@ -1,34 +1,37 @@
-"""策略运行时管理器 — Phase 8 实盘就绪版
+"""策略运行时管理器 — M4 生产加固版
 
 主链路（每 tick）:
   1. kill_switch 检查（触发则拒绝下单）
-  2. fetch_ticker → current_price
+  2. tick_cache.get → current_price（合并重复请求）
   3. 若持仓: stop_loss_manager.check() → 触发则平仓
   4. analyze → signal
   5. 若有信号: regime_detector → risk_engine.full_check → 金额上限 → portfolio_allocator → create_market_order
   6. 下单后 fetch_order 对账
-  7. 持仓状态持久化到 JSON
+  7. 持仓状态持久化到 RunnerState 表（DB 行级锁）
 
-Phase 8 改动：
-  - 持仓状态持久化到 data/runner_state.json（崩溃不丢）
-  - 恢复 RUNNING 策略：startup 时从 DB 查 status=RUNNING 的策略自动重启
-  - kill_switch 触发时停止所有策略
-  - 金额硬上限检查
-  - 下单后对账（fetch_order 校验）
+M4 改动：
+  - runner_state.json 迁入 RunnerState 表（DB 乐观锁 + locked_by/lock_expires）
+  - 新增 INSTANCE_ID 实例标识（hostname:pid），支持多实例部署
+  - tick 内合并重复请求（tick_cache 消除 fetch_ticker 重复调用）
+  - 消除文件锁，崩溃后锁自动过期（LOCK_TTL_SECONDS=60s）
+  - 首次启动自动迁移 runner_state.json → DB（迁移后重命名 .migrated）
 """
 import asyncio
 import json
+import os
+import socket
 import time
 from typing import Dict, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from strategies.base import SignalType
 from db.database import async_session
-from db.models import Strategy, StrategyStatus, StrategyType
+from db.models import Strategy, StrategyStatus, StrategyType, RunnerState
 from sqlalchemy import select
 from core.exchange import shared_exchange, ExchangeError
 from core.logger import log
 from core.kill_switch import kill_switch
+from core.tick_cache import tick_cache
 from config import settings
 from services.regime_detector import regime_detector, MarketRegime
 from services.risk_engine import risk_engine
@@ -37,27 +40,39 @@ from services.portfolio_allocator import portfolio_allocator
 
 
 # ------------------------------------------------------------------
-# 状态持久化
+# M4: 实例标识 + 锁配置
 # ------------------------------------------------------------------
 
-STATE_FILE = Path(__file__).parent.parent / "data" / "runner_state.json"
+INSTANCE_ID = f"{socket.gethostname()}:{os.getpid()}"
+LOCK_TTL_SECONDS = 60  # 锁过期时间：60s（超过则其他实例可抢占）
 
 
-def _load_state() -> dict:
+def _utcnow_naive() -> datetime:
+    """统一返回 naive UTC datetime（与 DB TIMESTAMP WITHOUT TIME ZONE 兼容）"""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+# 旧 JSON 状态文件（仅用于一次性迁移）
+_LEGACY_STATE_FILE = Path(__file__).parent.parent / "data" / "runner_state.json"
+
+# 简易 balance 缓存（TTL 1s，消除并行策略 tick 内重复 fetch_balance）
+_balance_cache: dict[str, tuple[float, dict]] = {}
+_BALANCE_TTL = 1.0
+
+
+async def _get_cached_balance() -> dict:
+    """带 TTL 的 fetch_balance 缓存（消除多策略并行时的重复请求）"""
+    key = shared_exchange.name
+    now = time.time()
+    if key in _balance_cache:
+        ts, bal = _balance_cache[key]
+        if now - ts < _BALANCE_TTL:
+            return bal
     try:
-        if STATE_FILE.exists():
-            return json.loads(STATE_FILE.read_text(encoding="utf-8"))
-    except Exception as e:
-        log.warning(f"Runner: failed to load state: {e}")
-    return {"positions_usdt": {}, "positions_qty": {}, "stop_states": {}}
-
-
-def _save_state(state: dict):
-    try:
-        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        STATE_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
-    except Exception as e:
-        log.error(f"Runner: failed to save state: {e}")
+        bal = await asyncio.to_thread(shared_exchange.fetch_balance)
+        _balance_cache[key] = (time.time(), bal)
+        return bal
+    except Exception:
+        return {}
 
 
 # ------------------------------------------------------------------
@@ -70,30 +85,222 @@ class StrategyRunner:
         self._stop_managers: Dict[str, StopLossManager] = {}
         self._positions_usdt: Dict[str, float] = {}   # sid → 已分配资金 (USDT)
         self._positions_qty: Dict[str, float] = {}    # sid → 持仓数量 (币)
-        self._load_persistent_state()
+        self._state_loaded = False
 
-    def _load_persistent_state(self):
-        """从持久化文件恢复持仓状态"""
-        state = _load_state()
-        self._positions_usdt = {k: float(v) for k, v in state.get("positions_usdt", {}).items()}
-        self._positions_qty = {k: float(v) for k, v in state.get("positions_qty", {}).items()}
-        if self._positions_usdt:
-            log.info(f"Runner: restored {len(self._positions_usdt)} position states from disk")
+    # ------------------------------------------------------------------
+    # M4: 状态持久化（DB 替代 JSON）
+    # ------------------------------------------------------------------
 
-    def _persist_state(self):
-        """持久化持仓状态"""
-        _save_state({
-            "positions_usdt": self._positions_usdt,
-            "positions_qty": self._positions_qty,
-            "updated_at": time.time(),
-        })
+    async def _load_persistent_state(self):
+        """从 RunnerState 表恢复持仓状态。
+
+        M4: 替代 JSON 文件。首次启动时若 DB 无记录且存在旧 JSON，自动迁移。
+        """
+        try:
+            async with async_session() as session:
+                r = await session.execute(select(RunnerState))
+                rows = r.scalars().all()
+
+                if not rows and _LEGACY_STATE_FILE.exists():
+                    # 首次迁移：JSON → DB
+                    await self._migrate_legacy_json(session)
+
+                # 重新查询（迁移后才有数据）
+                if not rows:
+                    r = await session.execute(select(RunnerState))
+                    rows = r.scalars().all()
+
+                for row in rows:
+                    sid = row.strategy_id
+                    extra = row.extra or {}
+                    if "positions_usdt" in extra:
+                        self._positions_usdt[sid] = float(extra["positions_usdt"])
+                    if row.entry_size is not None:
+                        self._positions_qty[sid] = float(row.entry_size)
+
+                if self._positions_usdt:
+                    log.info(
+                        f"Runner: restored {len(self._positions_usdt)} position states from DB "
+                        f"(instance={INSTANCE_ID})"
+                    )
+                self._state_loaded = True
+        except Exception as e:
+            log.warning(f"Runner: failed to load state from DB: {e}")
+            self._state_loaded = True  # 即使失败也标记已加载，避免阻塞
+
+    async def _migrate_legacy_json(self, session):
+        """M4: 一次性迁移 runner_state.json → RunnerState 表"""
+        try:
+            data = json.loads(_LEGACY_STATE_FILE.read_text(encoding="utf-8"))
+            positions_usdt = data.get("positions_usdt", {})
+            positions_qty = data.get("positions_qty", {})
+
+            if not positions_usdt and not positions_qty:
+                # 空文件，无需迁移
+                _rename_legacy_file()
+                return
+
+            for sid, usdt_val in positions_usdt.items():
+                qty_val = float(positions_qty.get(sid, 0))
+                row = RunnerState(
+                    strategy_id=sid,
+                    position_side="long" if qty_val > 0 else "none",
+                    entry_size=qty_val if qty_val > 0 else None,
+                    locked_by=None,
+                    lock_expires=None,
+                    extra={"positions_usdt": float(usdt_val)},
+                )
+                session.add(row)
+
+            await session.commit()
+            log.info(f"Runner: migrated {len(positions_usdt)} states from JSON → DB")
+            _rename_legacy_file()
+        except Exception as e:
+            log.warning(f"Runner: legacy JSON migration failed (non-fatal): {e}")
+
+    async def _persist_state(self, sid: str):
+        """持久化单个策略的持仓状态到 RunnerState 表。
+
+        M4: 使用 locked_by/lock_expires 乐观锁，同实例续期。
+        """
+        try:
+            positions_usdt = self._positions_usdt.get(sid, 0.0)
+            positions_qty = self._positions_qty.get(sid, 0.0)
+            position_side = "long" if positions_qty > 0 else "none"
+
+            async with async_session() as session:
+                r = await session.execute(
+                    select(RunnerState).where(RunnerState.strategy_id == sid)
+                )
+                row = r.scalar_one_or_none()
+                now = _utcnow_naive()
+                lock_expires = now + timedelta(seconds=LOCK_TTL_SECONDS)
+
+                if row is None:
+                    row = RunnerState(
+                        strategy_id=sid,
+                        position_side=position_side,
+                        entry_price=None,
+                        entry_size=positions_qty if positions_qty > 0 else None,
+                        locked_by=INSTANCE_ID,
+                        lock_expires=lock_expires,
+                        extra={"positions_usdt": positions_usdt},
+                    )
+                    session.add(row)
+                else:
+                    row.position_side = position_side
+                    row.entry_size = positions_qty if positions_qty > 0 else None
+                    # 续期锁（仅当自己持有时）
+                    if row.locked_by == INSTANCE_ID or row.locked_by is None:
+                        row.locked_by = INSTANCE_ID
+                        row.lock_expires = lock_expires
+                    row.extra = {"positions_usdt": positions_usdt}
+
+                await session.commit()
+        except Exception as e:
+            log.error(f"Runner: failed to persist state for {sid}: {e}")
+
+    # ------------------------------------------------------------------
+    # M4: 行级锁（乐观锁模式）
+    # ------------------------------------------------------------------
+
+    async def _acquire_lock(self, sid: str) -> bool:
+        """获取策略锁（M4: 多实例乐观锁）。
+
+        锁获取规则：
+          - locked_by == INSTANCE_ID → 续期
+          - locked_by IS NULL → 获取
+          - lock_expires < now → 抢占（过期锁）
+          - 否则 → 拒绝（锁被其他实例持有）
+        """
+        try:
+            async with async_session() as session:
+                r = await session.execute(
+                    select(RunnerState).where(RunnerState.strategy_id == sid)
+                )
+                row = r.scalar_one_or_none()
+                now = _utcnow_naive()
+                lock_expires = now + timedelta(seconds=LOCK_TTL_SECONDS)
+
+                if row is None:
+                    row = RunnerState(
+                        strategy_id=sid,
+                        position_side="none",
+                        locked_by=INSTANCE_ID,
+                        lock_expires=lock_expires,
+                        extra={},
+                    )
+                    session.add(row)
+                elif row.locked_by == INSTANCE_ID:
+                    row.lock_expires = lock_expires
+                elif row.lock_expires is None or row.lock_expires < now:
+                    log.info(
+                        f"Runner[{sid}]: acquiring expired/free lock "
+                        f"(was held by {row.locked_by})"
+                    )
+                    row.locked_by = INSTANCE_ID
+                    row.lock_expires = lock_expires
+                else:
+                    log.warning(
+                        f"Runner[{sid}]: lock held by {row.locked_by}, "
+                        f"expires at {row.lock_expires}"
+                    )
+                    await session.rollback()
+                    return False
+
+                await session.commit()
+                return True
+        except Exception as e:
+            log.error(f"Runner[{sid}]: failed to acquire lock: {e}")
+            return False
+
+    async def _release_lock(self, sid: str):
+        """释放策略锁（仅当自己持有时）"""
+        try:
+            async with async_session() as session:
+                r = await session.execute(
+                    select(RunnerState).where(RunnerState.strategy_id == sid)
+                )
+                row = r.scalar_one_or_none()
+                if row and row.locked_by == INSTANCE_ID:
+                    row.locked_by = None
+                    row.lock_expires = None
+                    await session.commit()
+        except Exception as e:
+            log.warning(f"Runner[{sid}]: failed to release lock: {e}")
+
+    async def _renew_lock(self, sid: str):
+        """续期锁（每个 tick 调用，防止运行中过期）"""
+        try:
+            async with async_session() as session:
+                r = await session.execute(
+                    select(RunnerState).where(RunnerState.strategy_id == sid)
+                )
+                row = r.scalar_one_or_none()
+                if row and row.locked_by == INSTANCE_ID:
+                    row.lock_expires = _utcnow_naive() + timedelta(
+                        seconds=LOCK_TTL_SECONDS
+                    )
+                    await session.commit()
+        except Exception as e:
+            log.warning(f"Runner[{sid}]: failed to renew lock: {e}")
+
+    # ------------------------------------------------------------------
+    # 生命周期
+    # ------------------------------------------------------------------
 
     async def start(self, strategy_id: str, strategy_obj):
         if strategy_id in self._tasks:
             return
-        # kill_switch 检查
         if kill_switch.is_triggered:
             log.warning(f"StrategyRunner[{strategy_id}]: KILL SWITCH triggered, refuse to start")
+            return
+        # M4: 确保状态已加载
+        if not self._state_loaded:
+            await self._load_persistent_state()
+        # M4: 获取行级锁
+        if not await self._acquire_lock(strategy_id):
+            log.warning(f"StrategyRunner[{strategy_id}]: cannot acquire lock, refuse to start")
             return
         self._tasks[strategy_id] = asyncio.create_task(self._run_loop(strategy_id, strategy_obj))
 
@@ -110,11 +317,12 @@ class StrategyRunner:
                 s = r.scalar_one_or_none()
                 if s:
                     s.status = StrategyStatus.STOPPED
-                    s.stopped_at = datetime.now(timezone.utc)
+                    s.stopped_at = _utcnow_naive()
                     await session.commit()
             # 清理止损状态（保留持仓记录用于恢复）
             self._stop_managers.pop(strategy_id, None)
-            self._persist_state()
+            await self._persist_state(strategy_id)
+            await self._release_lock(strategy_id)
 
     async def stop_all(self) -> int:
         """停止所有运行中策略（紧急停止用）"""
@@ -128,11 +336,16 @@ class StrategyRunner:
         return n
 
     async def recover_running_strategies(self):
-        """启动时恢复所有 status=RUNNING 的策略
+        """启动时恢复所有 status=RUNNING 的策略。
 
-        Phase 8: 进程崩溃重启后，自动恢复之前运行中的策略。
+        M4: 进程崩溃重启后，自动恢复之前运行中的策略。
+        锁过期机制保证：崩溃实例持有的锁在 60s 后自动释放。
         """
         try:
+            # M4: 先加载持久化状态
+            if not self._state_loaded:
+                await self._load_persistent_state()
+
             async with async_session() as session:
                 r = await session.execute(
                     select(Strategy).where(Strategy.status == StrategyStatus.RUNNING)
@@ -143,7 +356,6 @@ class StrategyRunner:
                 log.info("Runner: no RUNNING strategies to recover")
                 return 0
 
-            # kill_switch 触发时不恢复
             if kill_switch.is_triggered:
                 log.warning(
                     f"Runner: KILL SWITCH triggered, marking {len(strategies)} "
@@ -187,8 +399,9 @@ class StrategyRunner:
             return MarketRegime.RANGING_LOW_VOL
 
     async def _get_total_capital(self) -> float:
+        """M4: 使用 balance 缓存，消除多策略并行时的重复请求"""
         try:
-            bal = await asyncio.to_thread(shared_exchange.fetch_balance)
+            bal = await _get_cached_balance()
             return bal.get("USDT", {}).get("total", 0.0)
         except Exception:
             return 0.0
@@ -219,14 +432,15 @@ class StrategyRunner:
     # ------------------------------------------------------------------
 
     async def _run_loop(self, sid: str, obj):
-        log.info(f"StrategyRunner[{sid}]: started for {obj.symbol}")
+        log.info(f"StrategyRunner[{sid}]: started for {obj.symbol} (instance={INSTANCE_ID})")
         try:
             while True:
                 try:
-                    # kill_switch 触发则停止
                     if kill_switch.is_triggered:
                         log.warning(f"StrategyRunner[{sid}]: KILL SWITCH triggered, stopping")
                         break
+                    # M4: 续期锁（每个 tick）
+                    await self._renew_lock(sid)
                     await self._tick(sid, obj)
                 except asyncio.CancelledError:
                     raise
@@ -237,11 +451,11 @@ class StrategyRunner:
             log.info(f"StrategyRunner[{sid}]: stopped")
             raise
         finally:
-            self._persist_state()
+            await self._persist_state(sid)
 
     async def _tick(self, sid: str, obj):
-        # 1. 获取当前价格
-        t = await asyncio.to_thread(shared_exchange.fetch_ticker, obj.symbol)
+        # M4: 1. 获取当前价格（tick_cache 合并重复请求）
+        t = await tick_cache.get(shared_exchange, obj.symbol)
         current_price = t.get("last", 0) or 0
         if current_price <= 0:
             return
@@ -285,7 +499,7 @@ class StrategyRunner:
             return  # hold 或无需调整
         order_usdt = abs(allocation.amount)
 
-        # 6. 金额硬上限检查（Phase 8）
+        # 6. 金额硬上限检查
         if order_usdt > settings.MAX_ORDER_AMOUNT_USDT:
             order_usdt = settings.MAX_ORDER_AMOUNT_USDT
             log.info(f"StrategyRunner[{sid}]: capped order to {order_usdt} (hard limit)")
@@ -317,14 +531,13 @@ class StrategyRunner:
             log.info(f"StrategyRunner[{sid}] order: {side} {order_amount:.6f} "
                      f"(@{current_price:.2f} = ${order_usdt:.2f}) id={order.get('id')}")
 
-            # Phase 8: 对账（fetch_order 校验订单真实存在）
+            # 对账（fetch_order 校验订单真实存在）
             if order.get("id"):
                 try:
                     verified = await asyncio.to_thread(
                         shared_exchange.fetch_order, order["id"], obj.symbol
                     )
                     if verified:
-                        # 用交易所返回的实际成交价/数量更新
                         actual_filled = float(verified.get("filled", 0) or order_amount)
                         actual_cost = float(verified.get("cost", 0) or order_usdt)
                         order_amount = actual_filled
@@ -355,10 +568,10 @@ class StrategyRunner:
             sm.set_side(side_str)
             self._stop_managers[sid] = sm
 
-        # 10. 更新持仓记录 + 持久化
+        # 10. 更新持仓记录 + 持久化（M4: DB）
         self._positions_usdt[sid] = current_position + order_usdt
         self._positions_qty[sid] = self._positions_qty.get(sid, 0.0) + order_amount
-        self._persist_state()
+        await self._persist_state(sid)
 
     async def _close_position(self, sid: str, symbol: str, side: str):
         """平仓"""
@@ -390,11 +603,11 @@ class StrategyRunner:
         except Exception as e:
             log.error(f"StrategyRunner[{sid}] close exception: {e}")
             return
-        # 清理状态 + 持久化
+        # 清理状态 + 持久化（M4: DB）
         self._stop_managers.pop(sid, None)
         self._positions_usdt.pop(sid, None)
         self._positions_qty.pop(sid, None)
-        self._persist_state()
+        await self._persist_state(sid)
 
     def is_running(self, strategy_id: str) -> bool:
         t = self._tasks.get(strategy_id)
@@ -406,7 +619,22 @@ class StrategyRunner:
             "positions_usdt": dict(self._positions_usdt),
             "positions_qty": dict(self._positions_qty),
             "running_strategies": list(self._tasks.keys()),
+            "instance_id": INSTANCE_ID,
         }
+
+
+# ------------------------------------------------------------------
+# M4: 旧 JSON 迁移辅助
+# ------------------------------------------------------------------
+
+def _rename_legacy_file():
+    """迁移完成后重命名 JSON 文件，避免重复迁移"""
+    try:
+        migrated = _LEGACY_STATE_FILE.with_suffix(".json.migrated")
+        _LEGACY_STATE_FILE.rename(migrated)
+        log.info(f"Runner: renamed legacy state file → {migrated.name}")
+    except Exception as e:
+        log.warning(f"Runner: failed to rename legacy state file: {e}")
 
 
 # ------------------------------------------------------------------
