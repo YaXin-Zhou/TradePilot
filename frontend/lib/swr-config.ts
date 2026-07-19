@@ -49,11 +49,11 @@ export function useMarketRegime(symbol: string = "BTC/USDT") {
 }
 
 export function useIndicators(symbol: string = "BTC/USDT", timeframe: string = "1h") {
-  return useMarketData(() => api.getIndicators(symbol, timeframe), `indicators:${symbol}:${timeframe}`, 60000);
+  return useMarketData(() => api.getIndicators(symbol, timeframe), `indicators:${symbol}:${timeframe}`, 60000, true);
 }
 
 export function usePrediction(symbol: string = "BTC/USDT") {
-  return useMarketData(() => api.getPrediction(symbol), `prediction:${symbol}`, 60000);
+  return useMarketData(() => api.getPrediction(symbol), `prediction:${symbol}`, 60000, true);
 }
 
 export function useTradeHistory(limit: number = 20) {

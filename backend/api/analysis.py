@@ -1,4 +1,5 @@
 """分析 API — 市场状态 / 风控策略 / 弱信号 / 情绪"""
+import numpy as np
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
@@ -228,5 +229,196 @@ async def get_news_sentiment_keyword(
         engine = get_news_sentiment_engine()
         report = await engine.analyze(symbol, news_limit=limit, use_ai=False)
         return {"success": True, "data": report.to_dict()}
+    except Exception as e:
+        return {"success": False, "error": str(e), "data": None}
+
+
+# ------------------------------------------------------------------
+# 技术指标 & 预测信号
+# ------------------------------------------------------------------
+
+def _ema(values: np.ndarray, period: int) -> np.ndarray:
+    """指数移动平均"""
+    alpha = 2.0 / (period + 1)
+    out = np.empty_like(values, dtype=float)
+    out[0] = values[0]
+    for i in range(1, len(values)):
+        out[i] = alpha * values[i] + (1 - alpha) * out[i - 1]
+    return out
+
+
+def _rsi(closes: np.ndarray, period: int = 14) -> float | None:
+    """RSI(14)"""
+    if len(closes) < period + 1:
+        return None
+    deltas = np.diff(closes)
+    gains = np.where(deltas > 0, deltas, 0.0)
+    losses = np.where(deltas < 0, -deltas, 0.0)
+    avg_gain = gains[:period].mean()
+    avg_loss = losses[:period].mean()
+    for i in range(period, len(deltas)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return float(100.0 - 100.0 / (1.0 + rs))
+
+
+def _compute_indicators(ohlcv_data: list[dict]) -> dict | None:
+    """从 OHLCV 计算全套技术指标。返回 dict 或 None（数据不足）"""
+    if not ohlcv_data or len(ohlcv_data) < 60:
+        return None
+    closes = np.array([c["close"] for c in ohlcv_data], dtype=float)
+    highs = np.array([c["high"] for c in ohlcv_data], dtype=float)
+    lows = np.array([c["low"] for c in ohlcv_data], dtype=float)
+    volumes = np.array([c.get("volume", 0) for c in ohlcv_data], dtype=float)
+
+    # RSI(14)
+    rsi = _rsi(closes, 14)
+
+    # MACD(12, 26, 9)
+    ema12 = _ema(closes, 12)
+    ema26 = _ema(closes, 26)
+    macd_line = ema12 - ema26
+    macd_signal = _ema(macd_line, 9)
+    macd = float(macd_line[-1])
+    macd_sig = float(macd_signal[-1])
+
+    # 布林带(20, 2σ)
+    bb_period = 20
+    if len(closes) >= bb_period:
+        sma20 = closes[-bb_period:].mean()
+        std20 = closes[-bb_period:].std(ddof=0)
+        bb_upper = float(sma20 + 2 * std20)
+        bb_lower = float(sma20 - 2 * std20)
+        bb_width = float(bb_upper - bb_lower)
+    else:
+        bb_upper = bb_lower = bb_width = 0.0
+
+    # EMA 9 / 21 / 50
+    ema_9 = float(_ema(closes, 9)[-1])
+    ema_21 = float(_ema(closes, 21)[-1])
+    ema_50 = float(_ema(closes, 50)[-1])
+
+    # ATR(14)
+    atr_period = 14
+    if len(closes) > atr_period:
+        tr = np.maximum(
+            highs[1:] - lows[1:],
+            np.maximum(
+                np.abs(highs[1:] - closes[:-1]),
+                np.abs(lows[1:] - closes[:-1]),
+            ),
+        )
+        atr = float(tr[-atr_period:].mean())
+    else:
+        atr = 0.0
+
+    # Volume Ratio（当前 / 过去 20 根均值）
+    vol_period = 20
+    if len(volumes) >= vol_period + 1 and volumes[-vol_period:-1].mean() > 0:
+        volume_ratio = float(volumes[-1] / volumes[-vol_period:-1].mean())
+    else:
+        volume_ratio = 1.0
+
+    return {
+        "rsi": rsi,
+        "macd": macd,
+        "macd_signal": macd_sig,
+        "bb_upper": bb_upper,
+        "bb_lower": bb_lower,
+        "bb_width": bb_width,
+        "ema_9": ema_9,
+        "ema_21": ema_21,
+        "ema_50": ema_50,
+        "atr": atr,
+        "volume_ratio": volume_ratio,
+        "current_price": float(closes[-1]),
+    }
+
+
+@router.get("/indicators")
+def get_indicators(
+    symbol: str = Query("BTC/USDT"),
+    timeframe: str = Query("1h"),
+    _user: dict = Depends(get_current_user),
+):
+    """获取技术指标（RSI / MACD / 布林带 / EMA / ATR / Volume Ratio）"""
+    try:
+        ohlcv, _ = get_ohlcv(symbol, timeframe, limit=200)
+        result = _compute_indicators(ohlcv)
+        if result is None:
+            return {"success": False, "error": "insufficient data", "data": None}
+        return {"success": True, "data": result}
+    except Exception as e:
+        return {"success": False, "error": str(e), "data": None}
+
+
+@router.get("/predict")
+def get_prediction(
+    symbol: str = Query("BTC/USDT"),
+    timeframe: str = Query("1h"),
+    _user: dict = Depends(get_current_user),
+):
+    """基于技术指标给出预测信号（buy / sell / hold）+ 概率 + 置信度"""
+    try:
+        ohlcv, _ = get_ohlcv(symbol, timeframe, limit=200)
+        ind = _compute_indicators(ohlcv)
+        if ind is None:
+            return {"success": False, "error": "insufficient data", "data": None}
+
+        rsi = ind["rsi"] or 50.0
+        macd = ind["macd"]
+        macd_sig = ind["macd_signal"]
+        macd_hist = macd - macd_sig
+        price = ind["current_price"]
+        ema_9 = ind["ema_9"]
+        ema_21 = ind["ema_21"]
+
+        # 评分：多信号加权
+        score = 0.0
+        # RSI 贡献（30 以下偏多，70 以上偏空）
+        if rsi < 30:
+            score += (30 - rsi) / 30 * 0.4
+        elif rsi > 70:
+            score -= (rsi - 70) / 30 * 0.4
+        # MACD 柱贡献
+        score += max(-0.3, min(0.3, macd_hist / max(abs(macd), 1e-9) * 0.3)) if macd != 0 else 0
+        # EMA 排列贡献（金叉/死叉）
+        if ema_9 > ema_21:
+            score += 0.2
+        else:
+            score -= 0.2
+
+        # 归一化到概率
+        prob_up = float(max(0.05, min(0.95, 0.5 + score)))
+        prob_down = 1.0 - prob_up
+
+        if prob_up > 0.6:
+            signal = "buy"
+            prediction = "up"
+        elif prob_up < 0.4:
+            signal = "sell"
+            prediction = "down"
+        else:
+            signal = "hold"
+            prediction = "up" if prob_up >= 0.5 else "down"
+
+        confidence = float(abs(prob_up - 0.5) * 2)
+
+        return {
+            "success": True,
+            "data": {
+                "signal": signal,
+                "prediction": prediction,
+                "current_price": price,
+                "prob_up": prob_up,
+                "prob_down": prob_down,
+                "confidence": confidence,
+                "rsi": rsi,
+                "macd_hist": float(macd_hist),
+            },
+        }
     except Exception as e:
         return {"success": False, "error": str(e), "data": None}
