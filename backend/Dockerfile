@@ -1,5 +1,6 @@
 # AI Quant Trade — Backend Dockerfile
-FROM python:3.12-slim
+# M5: 统一 Python 3.13 + 多 worker 支持
+FROM python:3.13-slim
 
 WORKDIR /app
 
@@ -22,8 +23,8 @@ RUN mkdir -p /app/data /app/logs
 EXPOSE 8000
 
 # 健康检查
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')" || exit 1
 
-# 启动
-CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# 启动 — M5: 默认 4 workers（M4 保证多 worker 安全）
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
