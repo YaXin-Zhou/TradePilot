@@ -7,10 +7,12 @@
   3. 族内聚合（同类型策略先加权平均），族间 Hedge（族间用指数加权）
   4. Sleeping Experts：Regime 不适配时自动休眠（weight → min_weight）
 
-参考: 《量化交易系统技术参考》第四章
+P1-3: JSON 文件持久化迁入 DB（OnlineLearnerStateRecord），
+      内存为读源 + fire-and-forget 异步 DB 写，调度器定期 refresh。
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import time
@@ -68,9 +70,12 @@ class OnlineLearner:
           "s1": -0.02,   # 策略 s1 本周收益 = -2%
           "s2": 0.05,    # 策略 s2 本周收益 = +5%
       }, sleeping=["s3"], regime="RANGING_HIGH_VOL")
+
+    P1-3: 持久化迁入 DB（OnlineLearnerStateRecord），内存为读源 + 异步 DB 写。
     """
 
-    STATE_FILE = Path(__file__).parent.parent / "data" / "online_learner.json"
+    # 旧 JSON 状态文件（仅用于一次性迁移）
+    _LEGACY_FILE = Path(__file__).parent.parent / "data" / "online_learner.json"
 
     def __init__(self, min_weight: float = 0.01, eta: float = 0.1,
                  window: int = 20, fixed_share: float = 0.05):
@@ -80,7 +85,94 @@ class OnlineLearner:
         self.fixed_share: float = fixed_share   # Fixed-Share 再分配比例
         self._experts: dict[str, ExpertState] = {}
         self._iteration: int = 0
-        self._load()
+        self._db_ready: bool = False
+
+    async def init_from_db(self):
+        """启动时从 DB 加载状态（P1-3）"""
+        try:
+            from db.database import async_session
+            from db.models import OnlineLearnerStateRecord
+            from sqlalchemy import select
+
+            async with async_session() as session:
+                r = await session.execute(
+                    select(OnlineLearnerStateRecord).where(OnlineLearnerStateRecord.id == 1)
+                )
+                row = r.scalar_one_or_none()
+                if row:
+                    self.eta = row.eta or 0.1
+                    self._iteration = row.iteration or 0
+                    for sid, data in (row.experts or {}).items():
+                        self._experts[sid] = ExpertState(**data)
+                    log.info(f"OnlineLearner: loaded {len(self._experts)} experts from DB")
+                else:
+                    # 尝试从旧 JSON 迁移
+                    await self._migrate_from_json()
+        except Exception as e:
+            log.warning(f"OnlineLearner: init_from_db failed ({e}), starting fresh")
+        finally:
+            self._db_ready = True
+
+    async def _migrate_from_json(self):
+        """一次性迁移：online_learner.json → DB"""
+        try:
+            if self._LEGACY_FILE.exists():
+                raw = json.loads(self._LEGACY_FILE.read_text(encoding="utf-8"))
+                self.eta = raw.get("eta", 0.1)
+                self._iteration = raw.get("iteration", 0)
+                for sid, data in raw.get("experts", {}).items():
+                    self._experts[sid] = ExpertState(**data)
+                log.info(f"OnlineLearner: migrated {len(self._experts)} experts from JSON")
+                await self._save_to_db()
+                self._LEGACY_FILE.replace(self._LEGACY_FILE.with_suffix(".migrated"))
+        except Exception as e:
+            log.warning(f"OnlineLearner: JSON migration failed: {e}")
+
+    async def refresh_from_db(self):
+        """多 worker 同步：从 DB 刷新内存状态（调度器每 N 秒调用）"""
+        try:
+            from db.database import async_session
+            from db.models import OnlineLearnerStateRecord
+            from sqlalchemy import select
+
+            async with async_session() as session:
+                r = await session.execute(
+                    select(OnlineLearnerStateRecord).where(OnlineLearnerStateRecord.id == 1)
+                )
+                row = r.scalar_one_or_none()
+                if row:
+                    self.eta = row.eta or 0.1
+                    self._iteration = row.iteration or 0
+                    self._experts.clear()
+                    for sid, data in (row.experts or {}).items():
+                        self._experts[sid] = ExpertState(**data)
+        except Exception:
+            pass  # 刷新失败不影响运行
+
+    async def _save_to_db(self):
+        """异步写入 DB"""
+        from db.database import async_session
+        from db.models import OnlineLearnerStateRecord
+        from sqlalchemy import select
+
+        async with async_session() as session:
+            r = await session.execute(
+                select(OnlineLearnerStateRecord).where(OnlineLearnerStateRecord.id == 1)
+            )
+            row = r.scalar_one_or_none()
+            data = {
+                "eta": self.eta,
+                "iteration": self._iteration,
+                "experts": {sid: e.to_dict() for sid, e in self._experts.items()},
+            }
+            if row is None:
+                row = OnlineLearnerStateRecord(id=1, **data)
+                session.add(row)
+            else:
+                row.eta = self.eta
+                row.iteration = self._iteration
+                row.experts = data["experts"]
+            await session.commit()
 
     # ------------------------------------------------------------------
     # 核心更新
@@ -144,7 +236,7 @@ class OnlineLearner:
             iteration=self._iteration,
         )
 
-        self._save()
+        self._persist()
         log.info(f"OnlineLearner[{regime or 'GENERAL'}]: iter={self._iteration} "
                  f"eta={self.eta:.3f} active={len(active_ids)} sleeping={len(sleeping)}")
         return result
@@ -163,7 +255,7 @@ class OnlineLearner:
         self._experts.clear()
         self._iteration = 0
         self.eta = 0.1
-        self._save()
+        self._persist()
 
     # ------------------------------------------------------------------
     # 内部算法
@@ -250,29 +342,15 @@ class OnlineLearner:
             for expert in self._experts.values():
                 expert.weight /= total
 
-    def _save(self):
+    def _persist(self):
+        """P1-3: fire-and-forget 异步 DB 写（内存已更新，DB 写失败不影响运行）"""
+        if not self._db_ready:
+            return
         try:
-            self.STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            data = {
-                "eta": self.eta,
-                "iteration": self._iteration,
-                "experts": {sid: e.to_dict() for sid, e in self._experts.items()},
-            }
-            self.STATE_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False))
-        except Exception as e:
-            log.error(f"OnlineLearner: save failed: {e}")
-
-    def _load(self):
-        try:
-            if self.STATE_FILE.exists():
-                raw = json.loads(self.STATE_FILE.read_text(encoding="utf-8"))
-                self.eta = raw.get("eta", 0.1)
-                self._iteration = raw.get("iteration", 0)
-                for sid, data in raw.get("experts", {}).items():
-                    self._experts[sid] = ExpertState(**data)
-                log.info(f"OnlineLearner: loaded {len(self._experts)} experts")
-        except Exception as e:
-            log.warning(f"OnlineLearner: load failed ({e})")
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._save_to_db())
+        except RuntimeError:
+            pass  # 无事件循环（同步脚本），跳过 DB 写
 
 
 # 全局单例

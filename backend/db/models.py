@@ -290,3 +290,63 @@ class RiskPolicyRecord(Base):
     atr_stop_multiplier = Column(Float, default=2.0)
     allowed_strategies = Column(JSON, default=list)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+# ------------------------------------------------------------------
+# P1-3: JSON 持久化迁入 DB（online_learner / strategy_pool / ai_iterator）
+# ------------------------------------------------------------------
+
+class OnlineLearnerStateRecord(Base):
+    """在线学习器状态 — 替代 online_learner.json，支持多 worker 一致性
+
+    单行表（id=1），存储全局学习器状态。
+    """
+    __tablename__ = "online_learner_state"
+    id = Column(Integer, primary_key=True, default=1)
+    eta = Column(Float, default=0.1)
+    iteration = Column(Integer, default=0)
+    experts = Column(JSON, default=dict)   # {strategy_id: ExpertState.to_dict()}
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class StrategyPoolRecord(Base):
+    """策略池记录 — 替代 strategy_pool.json，支持多 worker 一致性
+
+    每个策略一行，存储运行表现和权重。
+    """
+    __tablename__ = "strategy_pool_records"
+    id = Column(String(64), primary_key=True)          # strategy_id
+    name = Column(String(128), default="")
+    strategy_type = Column(String(32), default="unknown")
+    weight = Column(Float, default=0.0)
+    running_sharpe = Column(Float, default=0.0)
+    running_max_dd = Column(Float, default=0.0)
+    return_series = Column(JSON, default=list)          # 最近 100 个收益率
+    status = Column(String(16), default="active")
+    consecutive_losses = Column(Integer, default=0)
+    total_trades = Column(Integer, default=0)
+    allocated_capital = Column(Float, default=0.0)
+    deployed_at = Column(Float, nullable=True)
+    last_updated = Column(Float, default=0.0)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class IterationTaskRecord(Base):
+    """AI 迭代任务 — 替代 iteration_tasks.json + iteration_data_{id}.json
+
+    每个迭代任务一行，task_data JSON 列存储完整轮次数据。
+    """
+    __tablename__ = "iteration_tasks"
+    task_id = Column(String(64), primary_key=True)
+    status = Column(String(16), default="pending")
+    goal = Column(Text, default="")
+    symbol = Column(String(32), default="BTC/USDT")
+    timeframe = Column(String(16), default="1h")
+    max_rounds = Column(Integer, default=3)
+    current_round = Column(Integer, default=0)
+    total_variants = Column(Integer, default=0)
+    scientific_passed = Column(Integer, default=0)
+    best_variant = Column(JSON, nullable=True)
+    task_data = Column(JSON, nullable=True)    # 完整任务详情（轮次+变体）
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)

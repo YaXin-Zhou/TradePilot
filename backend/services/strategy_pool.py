@@ -7,9 +7,13 @@
   - 相关性矩阵（热力图数据源）
   - 自动启停：连续亏损自动休眠、Sharpe 归零淘汰
   - 前端仪表盘数据源
+
+P1-3: JSON 文件持久化迁入 DB（StrategyPoolRecord），
+      内存为读源 + fire-and-forget 异步 DB 写，调度器定期 refresh。
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import time
@@ -70,13 +74,128 @@ class PoolStrategy:
 class StrategyPool:
     """策略池管理器"""
 
-    POOL_FILE = Path(__file__).parent.parent / "data" / "strategy_pool.json"
     MAX_SLEEP_LOSSES: int = 5       # 连续亏损 5 次自动休眠
     SHARPE_ELIMINATE: float = -0.5  # Sharpe 低于此值淘汰
+    # 旧 JSON 文件（仅用于一次性迁移）
+    _LEGACY_FILE = Path(__file__).parent.parent / "data" / "strategy_pool.json"
 
     def __init__(self):
         self._strategies: dict[str, PoolStrategy] = {}
-        self._load()
+        self._db_ready: bool = False
+
+    async def init_from_db(self):
+        """启动时从 DB 加载策略池（P1-3）"""
+        try:
+            from db.database import async_session
+            from db.models import StrategyPoolRecord
+            from sqlalchemy import select
+
+            async with async_session() as session:
+                r = await session.execute(select(StrategyPoolRecord))
+                rows = r.scalars().all()
+                if rows:
+                    for row in rows:
+                        s = PoolStrategy(
+                            id=row.id, name=row.name,
+                            strategy_type=row.strategy_type,
+                            weight=row.weight,
+                            running_sharpe=row.running_sharpe,
+                            running_max_dd=row.running_max_dd,
+                            status=StrategyStatus(row.status) if row.status else StrategyStatus.ACTIVE,
+                            consecutive_losses=row.consecutive_losses,
+                            total_trades=row.total_trades,
+                            allocated_capital=row.allocated_capital,
+                            deployed_at=row.deployed_at,
+                            last_updated=row.last_updated or time.time(),
+                        )
+                        s.return_series = row.return_series or []
+                        self._strategies[row.id] = s
+                    log.info(f"StrategyPool: loaded {len(self._strategies)} strategies from DB")
+                else:
+                    await self._migrate_from_json()
+        except Exception as e:
+            log.warning(f"StrategyPool: init_from_db failed ({e}), starting fresh")
+        finally:
+            self._db_ready = True
+
+    async def _migrate_from_json(self):
+        """一次性迁移：strategy_pool.json → DB"""
+        try:
+            if self._LEGACY_FILE.exists():
+                raw = json.loads(self._LEGACY_FILE.read_text(encoding="utf-8"))
+                for sid, data in raw.items():
+                    returns = data.pop("return_series", [])
+                    fields = {k: v for k, v in data.items()
+                              if k in PoolStrategy.__dataclass_fields__ and k != "id"}
+                    s = PoolStrategy(id=sid, **fields)
+                    s.return_series = returns
+                    if isinstance(data.get("status"), str):
+                        try:
+                            s.status = StrategyStatus(data["status"])
+                        except ValueError:
+                            pass
+                    self._strategies[sid] = s
+                log.info(f"StrategyPool: migrated {len(self._strategies)} strategies from JSON")
+                await self._save_to_db()
+                self._LEGACY_FILE.replace(self._LEGACY_FILE.with_suffix(".migrated"))
+        except Exception as e:
+            log.warning(f"StrategyPool: JSON migration failed: {e}")
+
+    async def refresh_from_db(self):
+        """多 worker 同步：从 DB 刷新内存状态（调度器每 N 秒调用）"""
+        try:
+            from db.database import async_session
+            from db.models import StrategyPoolRecord
+            from sqlalchemy import select
+
+            async with async_session() as session:
+                r = await session.execute(select(StrategyPoolRecord))
+                rows = r.scalars().all()
+                if rows:
+                    self._strategies.clear()
+                    for row in rows:
+                        s = PoolStrategy(
+                            id=row.id, name=row.name,
+                            strategy_type=row.strategy_type,
+                            weight=row.weight,
+                            running_sharpe=row.running_sharpe,
+                            running_max_dd=row.running_max_dd,
+                            status=StrategyStatus(row.status) if row.status else StrategyStatus.ACTIVE,
+                            consecutive_losses=row.consecutive_losses,
+                            total_trades=row.total_trades,
+                            allocated_capital=row.allocated_capital,
+                            deployed_at=row.deployed_at,
+                            last_updated=row.last_updated or time.time(),
+                        )
+                        s.return_series = row.return_series or []
+                        self._strategies[row.id] = s
+        except Exception:
+            pass  # 刷新失败不影响运行
+
+    async def _save_to_db(self):
+        """异步全量写入 DB"""
+        from db.database import async_session
+        from db.models import StrategyPoolRecord
+        from sqlalchemy import select, delete
+
+        async with async_session() as session:
+            # 全量替换：先删后插（策略池数据量小）
+            await session.execute(delete(StrategyPoolRecord))
+            for sid, s in self._strategies.items():
+                record = StrategyPoolRecord(
+                    id=sid, name=s.name, strategy_type=s.strategy_type,
+                    weight=s.weight, running_sharpe=s.running_sharpe,
+                    running_max_dd=s.running_max_dd,
+                    return_series=s.return_series[-100:],
+                    status=s.status.value if hasattr(s.status, "value") else str(s.status),
+                    consecutive_losses=s.consecutive_losses,
+                    total_trades=s.total_trades,
+                    allocated_capital=s.allocated_capital,
+                    deployed_at=s.deployed_at,
+                    last_updated=s.last_updated,
+                )
+                session.add(record)
+            await session.commit()
 
     # ------------------------------------------------------------------
     # 策略 CRUD
@@ -94,7 +213,7 @@ class StrategyPool:
             weight=weight, deployed_at=time.time(),
         )
         self._strategies[strategy_id] = s
-        self._save()
+        self._persist()
         log.info(f"StrategyPool: registered {strategy_id} ({name}, {strategy_type})")
         return s
 
@@ -102,7 +221,7 @@ class StrategyPool:
         """从池中移除策略"""
         if strategy_id in self._strategies:
             del self._strategies[strategy_id]
-            self._save()
+            self._persist()
             log.info(f"StrategyPool: removed {strategy_id}")
 
     def get(self, strategy_id: str) -> Optional[PoolStrategy]:
@@ -162,21 +281,21 @@ class StrategyPool:
             s.weight = 0.0
             log.warning(f"StrategyPool: {strategy_id} eliminated (Sharpe={s.running_sharpe:.3f})")
 
-        self._save()
+        self._persist()
 
     def set_weight(self, strategy_id: str, weight: float):
         s = self._strategies.get(strategy_id)
         if s:
             s.weight = max(0.0, min(1.0, weight))
             s.last_updated = time.time()
-            self._save()
+            self._persist()
 
     def set_status(self, strategy_id: str, status: StrategyStatus):
         s = self._strategies.get(strategy_id)
         if s:
             s.status = status
             s.last_updated = time.time()
-            self._save()
+            self._persist()
             log.info(f"StrategyPool: {strategy_id} → {status.value}")
 
     def set_allocated_capital(self, strategy_id: str, capital: float):
@@ -262,44 +381,15 @@ class StrategyPool:
         dy = math.sqrt(sum((yi - my) ** 2 for yi in y[:n]))
         return num / (dx * dy) if dx and dy else 0.0
 
-    def _save(self):
+    def _persist(self):
+        """P1-3: fire-and-forget 异步 DB 写（内存已更新，DB 写失败不影响运行）"""
+        if not self._db_ready:
+            return
         try:
-            self.POOL_FILE.parent.mkdir(parents=True, exist_ok=True)
-            data = {
-                sid: {
-                    **s.to_dict(),
-                    "return_series": s.return_series[-100:],  # 只保留最近 100 个
-                }
-                for sid, s in self._strategies.items()
-            }
-            self.POOL_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False))
-        except Exception as e:
-            log.error(f"StrategyPool: save failed: {e}")
-
-    def _load(self):
-        try:
-            if self.POOL_FILE.exists():
-                raw = json.loads(self.POOL_FILE.read_text(encoding="utf-8"))
-                for sid, data in raw.items():
-                    returns = data.pop("return_series", [])
-                    # 注意：to_dict() 序列化的 data 中已包含 "id" 字段，
-                    # 与构造参数 id=sid 冲突会触发
-                    # "multiple values for keyword argument 'id'"。
-                    # 这里显式移除，统一用 sid 作为权威 id。
-                    fields = {k: v for k, v in data.items()
-                              if k in PoolStrategy.__dataclass_fields__ and k != "id"}
-                    s = PoolStrategy(id=sid, **fields)
-                    s.return_series = returns
-                    # status str → enum
-                    if isinstance(data.get("status"), str):
-                        try:
-                            s.status = StrategyStatus(data["status"])
-                        except ValueError:
-                            pass
-                    self._strategies[sid] = s
-                log.info(f"StrategyPool: loaded {len(self._strategies)} strategies")
-        except Exception as e:
-            log.warning(f"StrategyPool: load failed ({e}), starting fresh")
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._save_to_db())
+        except RuntimeError:
+            pass  # 无事件循环（同步脚本），跳过 DB 写
 
 
 # 全局单例

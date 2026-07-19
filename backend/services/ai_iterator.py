@@ -2,7 +2,7 @@
 
 流水线: AI生成→批量回测→五重检验→排序→Top-K反馈→收敛检测
 
-数据持久化: JSON 文件 (data/iteration_tasks.json, data/iteration_data_{id}.json)
+P1-3: 数据持久化迁入 DB（IterationTaskRecord），替代 JSON 文件。
 """
 import json
 import time
@@ -17,8 +17,9 @@ from config import settings
 from core.logger import log
 from services.backtest_service import run_backtest, fetch_ohlcv, _increment_attempts
 
-DATA_DIR = pathlib.Path(__file__).parent.parent / "data"
-TASKS_FILE = DATA_DIR / "iteration_tasks.json"
+# 旧 JSON 文件路径（仅用于一次性迁移）
+_LEGACY_DATA_DIR = pathlib.Path(__file__).parent.parent / "data"
+_LEGACY_TASKS_FILE = _LEGACY_DATA_DIR / "iteration_tasks.json"
 
 # ─── 系统提示词 ────────────────────────────────────────────────
 
@@ -133,36 +134,152 @@ class IterationTask:
         return best
 
 
-# ─── 持久化 ────────────────────────────────────────────────────
+# ─── 持久化（P1-3: DB 替代 JSON）────────────────────────────────
 
-def _load_tasks() -> dict:
+async def _load_tasks() -> dict:
+    """从 DB 加载任务列表摘要"""
     try:
-        if TASKS_FILE.exists():
-            return json.loads(TASKS_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        pass
-    return {}
+        from db.database import async_session
+        from db.models import IterationTaskRecord
+        from sqlalchemy import select
+
+        async with async_session() as session:
+            r = await session.execute(select(IterationTaskRecord))
+            rows = r.scalars().all()
+            if not rows:
+                # 尝试从旧 JSON 迁移
+                await _migrate_from_json()
+                r = await session.execute(select(IterationTaskRecord))
+                rows = r.scalars().all()
+            tasks = {}
+            for row in rows:
+                d = row.task_data or {}
+                if not d:
+                    # 回退到摘要字段
+                    d = {
+                        "task_id": row.task_id, "status": row.status,
+                        "goal": row.goal, "symbol": row.symbol,
+                        "timeframe": row.timeframe,
+                        "max_rounds": row.max_rounds,
+                        "current_round": row.current_round,
+                        "total_variants": row.total_variants,
+                        "scientific_passed": row.scientific_passed,
+                        "best_variant": row.best_variant,
+                        "created_at": row.created_at.isoformat() if row.created_at else "",
+                    }
+                tasks[row.task_id] = d
+            return tasks
+    except Exception as e:
+        log.warning(f"ai_iterator: _load_tasks failed: {e}")
+        return {}
 
 
-def _save_tasks(tasks: dict):
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    TASKS_FILE.write_text(json.dumps(tasks, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def _load_task_data(task_id: str) -> dict | None:
-    f = DATA_DIR / f"iteration_data_{task_id}.json"
+async def _save_tasks(tasks: dict):
+    """保存任务列表到 DB（全量 upsert）"""
     try:
-        if f.exists():
-            return json.loads(f.read_text(encoding="utf-8"))
+        from db.database import async_session
+        from db.models import IterationTaskRecord
+        from sqlalchemy import select
+
+        async with async_session() as session:
+            for task_id, data in tasks.items():
+                r = await session.execute(
+                    select(IterationTaskRecord).where(IterationTaskRecord.task_id == task_id)
+                )
+                row = r.scalar_one_or_none()
+                fields = {
+                    "status": data.get("status", "pending"),
+                    "goal": data.get("goal", ""),
+                    "symbol": data.get("symbol", "BTC/USDT"),
+                    "timeframe": data.get("timeframe", "1h"),
+                    "max_rounds": data.get("max_rounds", 3),
+                    "current_round": data.get("current_round", 0),
+                    "total_variants": data.get("total_variants", 0),
+                    "scientific_passed": data.get("scientific_passed", 0),
+                    "best_variant": data.get("best_variant"),
+                }
+                if row is None:
+                    row = IterationTaskRecord(task_id=task_id, **fields)
+                    session.add(row)
+                else:
+                    for k, v in fields.items():
+                        setattr(row, k, v)
+            await session.commit()
+    except Exception as e:
+        log.error(f"ai_iterator: _save_tasks failed: {e}")
+
+
+async def _load_task_data(task_id: str) -> dict | None:
+    """从 DB 加载单个任务完整详情"""
+    try:
+        from db.database import async_session
+        from db.models import IterationTaskRecord
+        from sqlalchemy import select
+
+        async with async_session() as session:
+            r = await session.execute(
+                select(IterationTaskRecord).where(IterationTaskRecord.task_id == task_id)
+            )
+            row = r.scalar_one_or_none()
+            if row and row.task_data:
+                return row.task_data
+            return None
     except Exception:
-        pass
-    return None
+        return None
 
 
-def _save_task_data(task_id: str, data: dict):
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    f = DATA_DIR / f"iteration_data_{task_id}.json"
-    f.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+async def _save_task_data(task_id: str, data: dict):
+    """保存单个任务完整详情到 DB"""
+    try:
+        from db.database import async_session
+        from db.models import IterationTaskRecord
+        from sqlalchemy import select
+
+        async with async_session() as session:
+            r = await session.execute(
+                select(IterationTaskRecord).where(IterationTaskRecord.task_id == task_id)
+            )
+            row = r.scalar_one_or_none()
+            fields = {
+                "status": data.get("status", "pending"),
+                "goal": data.get("goal", ""),
+                "symbol": data.get("symbol", "BTC/USDT"),
+                "timeframe": data.get("timeframe", "1h"),
+                "max_rounds": data.get("max_rounds", 3),
+                "current_round": data.get("current_round", 0),
+                "total_variants": data.get("total_variants", 0),
+                "scientific_passed": data.get("scientific_passed", 0),
+                "best_variant": data.get("best_variant"),
+                "task_data": data,
+            }
+            if row is None:
+                row = IterationTaskRecord(task_id=task_id, **fields)
+                session.add(row)
+            else:
+                for k, v in fields.items():
+                    setattr(row, k, v)
+            await session.commit()
+    except Exception as e:
+        log.error(f"ai_iterator: _save_task_data failed: {e}")
+
+
+async def _migrate_from_json():
+    """一次性迁移：JSON 文件 → DB"""
+    try:
+        if _LEGACY_TASKS_FILE.exists():
+            raw = json.loads(_LEGACY_TASKS_FILE.read_text(encoding="utf-8"))
+            for task_id, data in raw.items():
+                # 尝试加载详情文件
+                detail_file = _LEGACY_DATA_DIR / f"iteration_data_{task_id}.json"
+                task_data = None
+                if detail_file.exists():
+                    task_data = json.loads(detail_file.read_text(encoding="utf-8"))
+                    detail_file.replace(detail_file.with_suffix(".migrated"))
+                await _save_task_data(task_id, task_data or data)
+            _LEGACY_TASKS_FILE.replace(_LEGACY_TASKS_FILE.with_suffix(".migrated"))
+            log.info(f"ai_iterator: migrated {len(raw)} tasks from JSON")
+    except Exception as e:
+        log.warning(f"ai_iterator: JSON migration failed: {e}")
 
 
 # ─── DeepSeek 调用 ─────────────────────────────────────────────
@@ -525,9 +642,9 @@ async def start_iteration(
     )
 
     # 保存初始状态
-    tasks = _load_tasks()
+    tasks = await _load_tasks()
     tasks[task_id] = task.to_dict()
-    _save_tasks(tasks)
+    await _save_tasks(tasks)
 
     local_tasks = [task]  # 用于 _save_tasks 引用本地变量
 
@@ -542,10 +659,10 @@ async def start_iteration(
                 if best is None or v.get("score", 0) > best.get("score", 0):
                     best = v
         d["best_variant"] = best
-        _save_task_data(task_id, d)
-        tasks = _load_tasks()
+        await _save_task_data(task_id, d)
+        tasks = await _load_tasks()
         tasks[task_id] = d
-        _save_tasks(tasks)
+        await _save_tasks(tasks)
 
     try:
         previous_rounds: list[dict] = []
@@ -598,10 +715,10 @@ async def start_iteration(
     return task_id
 
 
-def get_task_status(task_id: str) -> dict | None:
+async def get_task_status(task_id: str) -> dict | None:
     """获取任务当前状态"""
-    # 优先读取详细数据文件
-    detail = _load_task_data(task_id)
+    # 优先读取详细数据
+    detail = await _load_task_data(task_id)
     if detail:
         # 确保 best_variant 已计算
         if "best_variant" not in detail:
@@ -612,21 +729,25 @@ def get_task_status(task_id: str) -> dict | None:
                         best = v
             detail["best_variant"] = best
         return detail
-    # 回退到汇总文件
-    return _load_tasks().get(task_id)
+    # 回退到汇总
+    tasks = await _load_tasks()
+    return tasks.get(task_id)
 
 
-def list_tasks(limit: int = 20) -> list[dict]:
+async def list_tasks(limit: int = 20) -> list[dict]:
     """列出最近的任务"""
-    tasks = _load_tasks()
+    tasks = await _load_tasks()
     items = list(tasks.values())
     items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     return items[:limit]
 
 
-def get_best_variant(task_id: str) -> dict | None:
+async def get_best_variant(task_id: str) -> dict | None:
     """获取迭代任务中的最优策略"""
-    task_data = _load_task_data(task_id) or _load_tasks().get(task_id)
+    task_data = await _load_task_data(task_id)
+    if not task_data:
+        tasks = await _load_tasks()
+        task_data = tasks.get(task_id)
     if not task_data:
         return None
     best = None

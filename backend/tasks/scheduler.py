@@ -82,10 +82,9 @@ async def ai_heartbeat():
 
 
 async def refresh_kill_switch():
-    """P0-1: 每 5 秒从 DB 刷新 kill_switch + risk_engine 状态
+    """P0-1 + P1-3: 每 5 秒从 DB 刷新 kill_switch + risk_engine + online_learner + strategy_pool
 
-    多 worker 场景下，一个 worker 触发 kill_switch 后，
-    其他 worker 通过此任务检测到状态变化。
+    多 worker 场景下，一个 worker 修改状态后，其他 worker 通过此任务检测到变化。
     """
     try:
         from core.kill_switch import kill_switch
@@ -94,6 +93,14 @@ async def refresh_kill_switch():
         await risk_engine.refresh_from_db()
     except Exception as e:
         log.debug(f"Kill switch refresh failed: {e}")
+
+    try:
+        from services.online_learner import online_learner
+        from services.strategy_pool import strategy_pool
+        await online_learner.refresh_from_db()
+        await strategy_pool.refresh_from_db()
+    except Exception as e:
+        log.debug(f"Pool/learner refresh failed: {e}")
 
 
 async def flush_pending_orders():

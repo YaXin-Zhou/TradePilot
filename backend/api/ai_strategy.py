@@ -67,7 +67,7 @@ async def ai_iterate(req: IterateRequest, background_tasks: BackgroundTasks):
 @router.get("/iterate/status/{task_id}")
 async def iteration_status(task_id: str):
     """查询迭代任务状态"""
-    status = get_task_status(task_id)
+    status = await get_task_status(task_id)
     if status is None:
         return {"success": False, "error": "Task not found"}
     return {"success": True, "data": status}
@@ -76,7 +76,7 @@ async def iteration_status(task_id: str):
 @router.get("/iterate/best/{task_id}")
 async def iteration_best(task_id: str):
     """获取迭代任务的最优策略"""
-    best = get_best_variant(task_id)
+    best = await get_best_variant(task_id)
     if best is None:
         return {"success": False, "error": "No results yet"}
     return {"success": True, "data": best}
@@ -85,7 +85,7 @@ async def iteration_best(task_id: str):
 @router.get("/iterate/tasks")
 async def iteration_tasks(limit: int = 20):
     """列出最近的迭代任务"""
-    tasks = list_tasks(limit)
+    tasks = await list_tasks(limit)
     return {"success": True, "data": tasks}
 
 

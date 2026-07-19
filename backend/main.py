@@ -42,6 +42,12 @@ async def lifespan(app: FastAPI):
     from services.risk_engine import risk_engine
     await risk_engine.init_from_db()
 
+    # P1-3: online_learner + strategy_pool 从 DB 加载状态（替代 JSON 文件）
+    from services.online_learner import online_learner
+    await online_learner.init_from_db()
+    from services.strategy_pool import strategy_pool
+    await strategy_pool.init_from_db()
+
     # Phase 8: kill_switch 状态检查
     if kill_switch.is_triggered:
         log.warning(
