@@ -74,12 +74,18 @@ def encrypt(plaintext: str) -> str:
 
 
 def decrypt(ciphertext: str) -> str:
-    """解密字符串，返回明文。若密文为空或解密失败，返回空字符串"""
+    """解密字符串，返回明文。
+
+    P1-5: 解密失败时记录 error 日志（不再静默返回空字符串）。
+    密文为空时返回空字符串（正常行为，非异常）。
+    调用方应检查返回值是否为空以判断解密是否成功。
+    """
     if not ciphertext:
         return ""
     try:
         return get_fernet().decrypt(ciphertext.encode()).decode()
-    except Exception:
+    except Exception as e:
+        _log.error(f"Decryption failed (ciphertext prefix: {ciphertext[:20]}...): {e}")
         return ""
 
 

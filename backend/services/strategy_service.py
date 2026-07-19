@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import Strategy, StrategyType, StrategyStatus
 from db.database import async_session
 from strategies.runner import runner
-from strategies.custom import CustomStrategy
 
 
 async def list_all_strategies() -> list[dict]:
@@ -89,20 +88,21 @@ async def update_strategy(strategy_id: str, status: StrategyStatus | None = None
 
 
 async def start_strategy(strategy_id: str) -> dict:
-    """启动策略"""
+    """启动策略。
+
+    P1-4: 统一使用 _build_strategy_obj 构建策略对象，支持全部策略类型
+    （GRID/MA_CROSS/SMA_CROSS/RSI/BOLLINGER/CUSTOM/ML_SIGNAL/AI_GENERATED）。
+    """
     async with async_session() as session:
         r = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
         s = r.scalar_one_or_none()
         if not s:
             return {"success": False, "error": "not found"}
 
-        if s.type == StrategyType.CUSTOM:
-            instance = CustomStrategy(s.id, s.name, s.config)
-        elif s.type == StrategyType.GRID:
-            from strategies.grid import GridStrategy
-            instance = GridStrategy(s.id, s.name, s.config)
-        else:
-            return {"success": False, "error": "unsupported type"}
+        from strategies.runner import _build_strategy_obj
+        instance = _build_strategy_obj(s)
+        if instance is None:
+            return {"success": False, "error": f"unsupported strategy type: {s.type.value}"}
 
         await runner.start(strategy_id, instance)
         s.status = StrategyStatus.RUNNING

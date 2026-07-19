@@ -693,6 +693,14 @@ def _build_strategy_obj(strategy: Strategy):
                 period=config.get("period", 20),
                 std=config.get("std", 2.0),
             )
+        elif stype in (StrategyType.CUSTOM, StrategyType.ML_SIGNAL, StrategyType.AI_GENERATED):
+            # P1-4: CUSTOM/ML_SIGNAL/AI_GENERATED 回退到 CustomStrategy
+            from strategies.custom import CustomStrategy
+            return CustomStrategy(
+                strategy_id=str(strategy.id),
+                name=strategy.name,
+                config=config,
+            )
         else:
             log.warning(f"Runner: cannot build strategy obj for type {stype}, skip")
             return None

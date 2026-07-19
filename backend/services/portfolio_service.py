@@ -1,12 +1,15 @@
-"""投资组合服务层 — 余额查询、交易历史、绩效分析"""
-import random
-from datetime import datetime, timezone, timedelta
+"""投资组合服务层 — 余额查询、交易历史、绩效分析
+
+P1-1: 移除所有 Mock 回退 — 故障时返回明确错误，不返回假数据。
+"""
+from datetime import datetime, timezone
 
 from sqlalchemy import select, func
 from core.exchange import ExchangeClient
 from config import settings
 from db.models import Trade, Strategy
 from db.database import async_session
+from core.logger import log
 
 _exchange = ExchangeClient(
     exchange_name=settings.EXCHANGE_NAME,
@@ -17,81 +20,65 @@ _exchange = ExchangeClient(
 )
 
 
-def _mock_trades(count: int = 100) -> list[dict]:
-    """生成模拟交易历史"""
-    trades = []
-    now = datetime.now(timezone.utc)
-    for i in range(count):
-        buy = 85000 + random.uniform(-2000, 2000)
-        sell = buy * (1 + random.uniform(-0.02, 0.03))
-        qty = random.uniform(0.001, 0.05)
-        pnl = (sell - buy) * qty
-        trades.append({
-            "id": f"trade_{i}",
-            "symbol": "BTC/USDT",
-            "buy_price": round(buy, 2),
-            "sell_price": round(sell, 2),
-            "quantity": round(qty, 6),
-            "profit": round(pnl, 4),
-            "profit_pct": round((sell - buy) / buy * 100, 2),
-            "opened_at": (now - timedelta(hours=i * 3)).isoformat(),
-            "closed_at": (now - timedelta(hours=i * 3 - 1)).isoformat(),
-        })
-    return trades
-
-
 async def get_portfolio_summary() -> dict:
-    """获取投资组合摘要（余额 + 统计 + mock 回退）"""
+    """获取投资组合摘要（余额 + 统计）。
+
+    P1-1: 交易所查询失败时返回 success=False + 错误信息，不再返回假数据。
+    DB 查询失败时返回零值（不阻塞前端展示余额）。
+    """
     try:
         balance = _exchange.fetch_balance()
         ticker = _exchange.fetch_ticker(settings.DEFAULT_SYMBOL)
         total_usdt = balance.get("USDT", {}).get("total", 0)
         btc_balance = balance.get("BTC", {}).get("total", 0)
         estimated_total = total_usdt + btc_balance * ticker["last"]
+    except Exception as e:
+        log.warning(f"Portfolio: exchange fetch failed: {e}")
+        return {
+            "success": False,
+            "error": f"交易所连接失败: {e}",
+            "data": None,
+        }
 
+    # DB 统计（失败不阻塞，返回零值）
+    total_trades = 0
+    total_pnl = 0.0
+    active_strategies = 0
+    try:
         async with async_session() as session:
-            total_trades = await session.scalar(select(func.count(Trade.id)))
-            total_pnl = await session.scalar(select(func.coalesce(func.sum(Trade.profit), 0)))
+            total_trades = await session.scalar(select(func.count(Trade.id))) or 0
+            total_pnl = await session.scalar(select(func.coalesce(func.sum(Trade.profit), 0))) or 0.0
             active_strategies = await session.scalar(
                 select(func.count(Strategy.id)).where(Strategy.status == "running")
-            )
+            ) or 0
+    except Exception as e:
+        log.warning(f"Portfolio: DB stats failed (returning zeros): {e}")
 
-        return {
-            "success": True,
-            "data": {
-                "total_value_usdt": round(estimated_total, 2),
-                "usdt_balance": round(total_usdt, 2),
-                "btc_balance": round(btc_balance, 6),
-                "btc_price": round(ticker["last"], 2),
-                "total_trades": total_trades or 0,
-                "total_pnl": round(float(total_pnl or 0), 4),
-                "active_strategies": active_strategies or 0,
-            },
-        }
-    except Exception:
-        return {
-            "success": True,
-            "data": {
-                "total_value_usdt": 11150.28,
-                "usdt_balance": 9850.42,
-                "btc_balance": 0.1308,
-                "btc_price": 86500.00,
-                "total_trades": 127,
-                "total_pnl": 28.4556,
-                "active_strategies": 2,
-            },
-            "_mock": True,
-        }
+    return {
+        "success": True,
+        "data": {
+            "total_value_usdt": round(estimated_total, 2),
+            "usdt_balance": round(total_usdt, 2),
+            "btc_balance": round(btc_balance, 6),
+            "btc_price": round(ticker["last"], 2),
+            "total_trades": total_trades,
+            "total_pnl": round(float(total_pnl), 4),
+            "active_strategies": active_strategies,
+        },
+    }
 
 
 async def get_trade_history(limit: int = 100) -> dict:
-    """获取交易历史（DB 优先 + mock 回退）"""
-    async with async_session() as session:
-        result = await session.execute(
-            select(Trade).order_by(Trade.closed_at.desc()).limit(limit)
-        )
-        trades = result.scalars().all()
-        if trades:
+    """获取交易历史（DB 查询，无记录返回空列表）。
+
+    P1-1: 移除 Mock 回退 — DB 无交易记录时返回空列表，不生成假数据。
+    """
+    try:
+        async with async_session() as session:
+            result = await session.execute(
+                select(Trade).order_by(Trade.closed_at.desc()).limit(limit)
+            )
+            trades = result.scalars().all()
             return {
                 "success": True,
                 "data": [
@@ -106,15 +93,33 @@ async def get_trade_history(limit: int = 100) -> dict:
                     for t in trades
                 ],
             }
-    return {"success": True, "data": _mock_trades(limit), "_mock": True}
+    except Exception as e:
+        log.error(f"Trade history query failed: {e}")
+        return {"success": False, "error": str(e), "data": []}
 
 
 async def get_performance() -> dict:
-    """获取绩效分析（PnL 计算 + 曲线 + mock 回退）"""
-    async with async_session() as session:
-        result = await session.execute(select(Trade).order_by(Trade.closed_at.asc()))
-        trades = result.scalars().all()
-        if trades:
+    """获取绩效分析（PnL 计算 + 曲线）。
+
+    P1-1: 移除 Mock 回退 — DB 无交易记录时返回零值统计，不生成假数据。
+    """
+    try:
+        async with async_session() as session:
+            result = await session.execute(select(Trade).order_by(Trade.closed_at.asc()))
+            trades = result.scalars().all()
+            if not trades:
+                return {
+                    "success": True,
+                    "data": {
+                        "total_pnl": 0.0,
+                        "total_trades": 0,
+                        "win_rate": 0.0,
+                        "wins": 0,
+                        "losses": 0,
+                        "pnl_curve": [],
+                    },
+                }
+
             total_pnl = sum(t.profit for t in trades)
             wins = sum(1 for t in trades if t.profit > 0)
             win_rate = wins / len(trades) * 100 if trades else 0
@@ -137,24 +142,6 @@ async def get_performance() -> dict:
                     "pnl_curve": pnl_curve,
                 },
             }
-
-    # Mock 回退
-    mock_trades = _mock_trades(50)
-    cumulative = 0.0
-    pnl_curve = []
-    for t in reversed(mock_trades):
-        cumulative += t["profit"]
-        pnl_curve.append({"date": t["closed_at"], "pnl": round(cumulative, 4)})
-    wins = sum(1 for t in mock_trades if t["profit"] > 0)
-    return {
-        "success": True,
-        "data": {
-            "total_pnl": round(sum(t["profit"] for t in mock_trades), 4),
-            "total_trades": len(mock_trades),
-            "win_rate": round(wins / len(mock_trades) * 100, 2) if mock_trades else 0,
-            "wins": wins,
-            "losses": len(mock_trades) - wins,
-            "pnl_curve": pnl_curve,
-        },
-        "_mock": True,
-    }
+    except Exception as e:
+        log.error(f"Performance query failed: {e}")
+        return {"success": False, "error": str(e), "data": None}
