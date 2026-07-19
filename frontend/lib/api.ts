@@ -194,12 +194,14 @@ export const api = {
     request(`/api/ai/iterate/best/${taskId}`),
   listIterationTasks: (limit = 20) =>
     request(`/api/ai/iterate/tasks?limit=${limit}`),
-  // Settings
+  // Settings (双套配置：模拟盘 + 实盘)
   getExchangeSettings: () => request("/api/settings/exchange"),
-  saveExchangeSettings: (data: { api_key: string; secret: string; passphrase: string; testnet: boolean }) =>
+  saveExchangeSettings: (data: { mode: "testnet" | "live"; api_key: string; secret: string; passphrase: string; verify_permissions?: boolean }) =>
     request("/api/settings/exchange", { method: "POST", body: JSON.stringify(data) }),
-  testConnection: (data: { api_key?: string; secret?: string; passphrase?: string; testnet?: boolean }) =>
-    request("/api/exchange/test-connection", { method: "POST", body: JSON.stringify(data) }),
+  switchExchangeMode: (data: { mode: "testnet" | "live"; confirm?: boolean }) =>
+    request("/api/settings/exchange/switch", { method: "POST", body: JSON.stringify(data) }),
+  testConnection: (data: { mode: "testnet" | "live"; api_key?: string; secret?: string; passphrase?: string }) =>
+    request("/api/settings/exchange/test", { method: "POST", body: JSON.stringify(data) }),
 
   // Exchange
   getExchangeStatus: () => request("/api/exchange/status"),
