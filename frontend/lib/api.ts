@@ -177,6 +177,24 @@ export const api = {
 
   // Exchange
   getExchangeStatus: () => request("/api/exchange/status"),
+
+  // Strategy Pool
+  getPoolSummary: () => request("/api/strategies/pool/summary"),
+  getPoolCorrelation: () => request("/api/strategies/pool/correlation"),
+  registerToPool: (strategyId: string, data: { name: string; strategy_type: string; weight?: number }) =>
+    request(`/api/strategies/pool/${strategyId}/register`, { method: "POST", body: JSON.stringify(data) }),
+  setPoolStatus: (strategyId: string, status: string) =>
+    request(`/api/strategies/pool/${strategyId}/status?status=${status}`, { method: "POST" }),
+  removeFromPool: (strategyId: string) =>
+    request(`/api/strategies/pool/${strategyId}`, { method: "DELETE" }),
+  updateLearner: (data: { returns: Record<string, number>; sleeping?: string[]; regime?: string }) =>
+    request("/api/strategies/learner/update", { method: "POST", body: JSON.stringify(data) }),
+  getLearnerWeights: () => request("/api/strategies/learner/weights"),
+  allocateCapital: (data: { weights: Record<string, number>; total_capital: number; current_positions?: Record<string, number>; regime?: string }) =>
+    request("/api/portfolio/allocate", { method: "POST", body: JSON.stringify(data) }),
+  rebalanceCapital: (data: { weights: Record<string, number>; total_capital: number; current_positions?: Record<string, number>; regime?: string }) =>
+    request("/api/portfolio/rebalance", { method: "POST", body: JSON.stringify(data) }),
+
   // Auth
   login: (username: string, password: string) =>
     request("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),

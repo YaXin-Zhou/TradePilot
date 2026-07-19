@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useRouter } from "next/router";
 import {
   LayoutDashboard, TrendingUp, BarChart3, Settings,
-  Activity, Wallet, LineChart, Menu, X, ChevronDown, Languages, LogIn, LogOut, FlaskConical, Shield
+  Activity, Wallet, LineChart, Menu, X, ChevronDown, Languages, LogIn, LogOut, FlaskConical, Shield, Layers
 } from "lucide-react";
 import { getToken, clearToken } from "../lib/api"
 import { useLanguage } from "../lib/LanguageContext";
@@ -20,6 +20,7 @@ const NAV_ITEMS = [
   { label: "nav.aiLab", icon: FlaskConical, href: "/ai-lab", color: "#06b6d4" },
   { label: "nav.backtest", icon: BarChart3, href: "/backtest", color: "#f0b90b" },
   { label: "nav.risk", icon: Shield, href: "/settings/risk", color: "#f0b90b" },
+  { label: "nav.pool", icon: Layers, href: "/pool", color: "#a855f7" },
  { label: "nav.settings", icon: Settings, href: "/settings", color: "#848e9c" },
 ];
 

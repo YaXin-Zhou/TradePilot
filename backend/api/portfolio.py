@@ -1,7 +1,10 @@
 """投资组合 API — 薄层：参数校验 → 调用 service → 构造响应"""
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Depends
+from pydantic import BaseModel
 
 from services.portfolio_service import get_portfolio_summary, get_trade_history, get_performance
+from services.portfolio_allocator import portfolio_allocator
+from auth.deps import get_current_user
 
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
 
@@ -19,3 +22,39 @@ async def trade_history(limit: int = Query(100, ge=1, le=500)):
 @router.get("/performance")
 async def performance():
     return await get_performance()
+
+
+# ------------------------------------------------------------------
+# 资金分配
+# ------------------------------------------------------------------
+
+class AllocateRequest(BaseModel):
+    weights: dict[str, float]
+    total_capital: float
+    current_positions: dict[str, float] = {}
+    regime: str = "RANGING_LOW_VOL"
+
+
+class RebalanceRequest(BaseModel):
+    weights: dict[str, float]
+    total_capital: float
+    current_positions: dict[str, float] = {}
+    regime: str = "RANGING_LOW_VOL"
+
+
+@router.post("/allocate")
+def allocate_capital(req: AllocateRequest, _user: dict = Depends(get_current_user)):
+    """渐进式资金分配"""
+    plan = portfolio_allocator.allocate(
+        req.weights, req.total_capital, req.current_positions, req.regime,
+    )
+    return {"success": True, "data": plan.to_dict()}
+
+
+@router.post("/rebalance")
+def rebalance_capital(req: RebalanceRequest, _user: dict = Depends(get_current_user)):
+    """全量再平衡"""
+    plan = portfolio_allocator.rebalance(
+        req.weights, req.total_capital, req.current_positions, req.regime,
+    )
+    return {"success": True, "data": plan.to_dict()}
