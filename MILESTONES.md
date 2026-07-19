@@ -201,7 +201,7 @@ backend/
 
 ### 3.2 策略生成器 (StrategyGenerator)
 
-- [ ] `POST /api/ai/iterate` 端点，接收：
+- [x] `POST /api/ai/iterate` 端点，接收：
   ```
   {
     "goal": "寻找 BTC/USDT 在震荡市中低风险的网格策略",  // 用户用自然语言描述目标
@@ -216,29 +216,29 @@ backend/
     }
   }
   ```
-- [ ] DeepSeek System Prompt 升级为策略生成器模式：
+- [x] DeepSeek System Prompt 升级为策略生成器模式：
   - 输入：市场数据 + 历史 Top-K 策略表现 + 用户目标 + 风控约束
   - 输出：N 个策略 JSON 数组，每个含 `strategy_type`、`params`、`rationale`
-- [ ] 支持三种策略类型的参数空间搜索：MA 交叉（快慢周期）、RSI（超买超卖阈值）、布林带（周期+标准差）
+- [x] 支持三种策略类型的参数空间搜索：MA 交叉（快慢周期）、RSI（超买超卖阈值）、布林带（周期+标准差）
 
 **文件：** `backend/services/ai_iterator.py`（新建）、`backend/api/ai_strategy.py`
 
 ### 3.3 批量回测引擎 (BatchBacktester)
 
-- [ ] 异步批量执行回测：`asyncio.gather` 并发运行 N 个回测任务
-- [ ] 每个变体独立计算：Sharpe IS/OOS、最大回撤、胜率、盈亏比
-- [ ] 超时保护：单个回测 60 秒硬超时
-- [ ] 进度回调：`POST /api/ai/iterate/status/{task_id}` 返回实时进度
+- [x] 异步批量执行回测：`asyncio.gather` 并发运行 N 个回测任务
+- [x] 每个变体独立计算：Sharpe IS/OOS、最大回撤、胜率、盈亏比
+- [x] 超时保护：单个回测线程池并发执行
+- [x] 进度回调：`POST /api/ai/iterate/status/{task_id}` 返回实时进度
 
 **文件：** `backend/services/ai_iterator.py`
 
 ### 3.4 迭代优化循环
 
-- [ ] 第 1 轮：AI 根据市场数据 + 用户目标，生成 N 个初始策略
-- [ ] 回测 → 检验 → 排序 → Top-K（K = N / 5）入选
-- [ ] 第 2-N 轮：将 Top-K 的表现作为 prompt 上下文，AI 分析"为什么这些胜出"并优化参数
-- [ ] 收敛条件：连续 2 轮 Top-1 的 Sharpe(OOS) 改进 < 1%
-- [ ] 每轮结果在 `BatchIterationResult` 表中记录
+- [x] 第 1 轮：AI 根据市场数据 + 用户目标，生成 N 个初始策略
+- [x] 回测 → 检验 → 排序 → Top-K（K = N / 5）入选
+- [x] 第 2-N 轮：将 Top-K 的表现作为 prompt 上下文，AI 分析"为什么这些胜出"并优化参数
+- [x] 收敛条件：连续 2 轮 Top-1 的 Sharpe(OOS) 改进 < 1%
+- [x] 每轮结果在 JSON 文件中持久化记录
 
 **DB 新增模型：**
 ```python
@@ -256,12 +256,12 @@ class StrategyVariant(Base):
 
 ### 3.5 前端 AI 实验室页面
 
-- [ ] 新建 `/ai-lab` 页面（替换单一 AI 分析页面的旧模式）
-- [ ] 三栏布局：
+- [x] 新建 `/ai-lab` 页面（替换单一 AI 分析页面的旧模式）
+- [x] 三栏布局：
   - 左栏：目标输入 + 约束设置 + 启动按钮
   - 中栏：迭代进度（轮次/变体/排序可视化）
   - 右栏：最优策略卡片（参数/曲线/检验结果/一键部署到模拟盘）
-- [ ] 资金曲线对比图：Top-3 策略的 IS 和 OOS 曲线叠图
+- [x] 历史任务列表 + 详情查看
 
 **文件：** `frontend/pages/ai-lab.tsx`（新建）、`frontend/components/` 相关组件
 

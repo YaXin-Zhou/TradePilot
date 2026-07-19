@@ -132,6 +132,16 @@ export const api = {
   getBacktestHistory: () => request("/api/backtest/history"),
   clearBacktestHistory: () => request("/api/backtest/history/clear", { method: "POST" }),
   getBacktestStats: () => request("/api/backtest/stats"),
+
+  // AI Iteration
+  startIteration: (data: { goal: string; symbol?: string; timeframe?: string; variants?: number; max_rounds?: number; capital?: number; risk_constraints?: any }) =>
+    request("/api/ai/iterate", { method: "POST", body: JSON.stringify(data) }),
+  getIterationStatus: (taskId: string) =>
+    request(`/api/ai/iterate/status/${taskId}`),
+  getIterationBest: (taskId: string) =>
+    request(`/api/ai/iterate/best/${taskId}`),
+  listIterationTasks: (limit = 20) =>
+    request(`/api/ai/iterate/tasks?limit=${limit}`),
   // Settings
   getExchangeSettings: () => request("/api/settings/exchange"),
   saveExchangeSettings: (data: { api_key: string; secret: string; passphrase: string; testnet: boolean }) =>
