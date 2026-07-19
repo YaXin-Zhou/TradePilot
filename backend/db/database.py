@@ -36,8 +36,29 @@ class Base(DeclarativeBase):
 
 async def init_db():
     from db.models import User, Strategy, Order, Trade, Position, MarketData, MLPrediction
+    from db.models import AuditLog, ExchangeCredential, RunnerState  # M1: 新增三张表
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # M1: 迁移已有 orders 表 — 添加 account_id / idempotency_key / raw 字段
+        await conn.run_sync(_migrate_orders_table)
+
+
+def _migrate_orders_table(conn):
+    """为已有 orders 表添加 M1/M3 新字段（create_all 不会 ALTER 已有表）"""
+    from sqlalchemy import inspect, text
+    inspector = inspect(conn)
+    if "orders" not in inspector.get_table_names():
+        return  # 表不存在（首次启动），create_all 会处理
+    existing_cols = {c["name"] for c in inspector.get_columns("orders")}
+    new_cols = [
+        ("account_id", "VARCHAR(64) DEFAULT 'default'"),
+        ("idempotency_key", "VARCHAR(128)"),
+        ("raw", "JSON"),
+    ]
+    for col_name, col_type in new_cols:
+        if col_name not in existing_cols:
+            conn.execute(text(f"ALTER TABLE orders ADD COLUMN {col_name} {col_type}"))
+            print(f"[M1] Migrated: orders.{col_name} added")
 
 
 async def get_session() -> AsyncSession:

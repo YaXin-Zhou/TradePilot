@@ -2,7 +2,7 @@
 import enum
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Float, Integer, Boolean, DateTime, Text, Enum, JSON, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, String, Float, Integer, BigInteger, Boolean, DateTime, Text, Enum, JSON, ForeignKey, UniqueConstraint, func
 from sqlalchemy.orm import relationship
 from db.database import Base
 
@@ -93,6 +93,7 @@ class Order(Base):
     __tablename__ = "orders"
     id = Column(String, primary_key=True, default=_uuid)
     user_id = Column(String, ForeignKey("users.id"), default="default")
+    account_id = Column(String(64), default="default", index=True)  # M1: 多账户支持
     strategy_id = Column(String, ForeignKey("strategies.id"), nullable=True)
     symbol = Column(String(32), nullable=False)
     side = Column(Enum(OrderSide), nullable=False)
@@ -103,6 +104,8 @@ class Order(Base):
     filled = Column(Float, default=0.0)
     cost = Column(Float, default=0.0)
     exchange_order_id = Column(String(128), nullable=True)
+    idempotency_key = Column(String(128), nullable=True, index=True)  # M3: 幂等键防重复下单
+    raw = Column(JSON, nullable=True)  # M3: 交易所原始返回
     created_at = Column(DateTime, default=_utcnow)
     filled_at = Column(DateTime, nullable=True)
     user = relationship("User", back_populates="orders")
@@ -194,3 +197,53 @@ class AppConfig(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     key = Column(String(64), unique=True, nullable=False)
     value = Column(Text, default="")
+
+
+# ---------------------------------------------------------------------------
+# M1 · 生产级扩表：审计日志 + 多租户凭据 + 策略运行状态
+# ---------------------------------------------------------------------------
+
+class AuditLog(Base):
+    """审计日志 — 记录所有关键操作（下单/撤单/配置变更/紧急停止等）"""
+    __tablename__ = "audit_logs"
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    event_time = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    actor = Column(String(64))                     # user_id / "system" / "scheduler"
+    action = Column(String(128))                   # "place_order" / "kill_switch" / "config_change"
+    entity_type = Column(String(64))               # "order" / "strategy" / "credential"
+    entity_id = Column(String(64))
+    detail = Column(JSON)                          # 完整 payload（幂等 key、价格、数量等）
+    result = Column(String(16))                    # "ok" / "error"
+    error_msg = Column(Text, nullable=True)
+
+
+class ExchangeCredential(Base):
+    """多租户交易所凭据 — AES-256-GCM 加密存储"""
+    __tablename__ = "exchange_credentials"
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant_id = Column(String(64), default="default", index=True)
+    account_label = Column(String(128), nullable=False)
+    exchange_id = Column(String(32), default="okx")  # "binance" / "okx" / ...
+    api_key_enc = Column(Text)                       # AES-256-GCM 加密
+    api_secret_enc = Column(Text)
+    passphrase_enc = Column(Text, nullable=True)
+    is_testnet = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "account_label", name="uq_tenant_account"),
+    )
+
+
+class RunnerState(Base):
+    """策略运行状态 — 替代 runner_state.json，支持多实例乐观锁"""
+    __tablename__ = "runner_states"
+    strategy_id = Column(String, ForeignKey("strategies.id"), primary_key=True)
+    position_side = Column(String(8), default="none")   # "long" / "short" / "none"
+    entry_price = Column(Float, nullable=True)
+    entry_size = Column(Float, nullable=True)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+    locked_by = Column(String(64), nullable=True)        # instance_id，乐观锁
+    lock_expires = Column(DateTime, nullable=True)
+    extra = Column(JSON, default=dict)                   # 扩展字段（网格状态等）
