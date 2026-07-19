@@ -1,7 +1,8 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 // Import toast - note: this module is evaluated before React hydrates, use dynamic import in pages
-let _toast: any = null;
+type ToastModule = typeof import("react-hot-toast");
+let _toast: ToastModule | null = null;
 async function getToast() {
   if (!_toast) {
     try { _toast = await import("react-hot-toast"); } catch {}
@@ -14,7 +15,7 @@ async function request(path: string, options?: RequestInit, timeoutMs: number = 
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   const mergedOpts = { ...options, signal: options?.signal || controller.signal };
   const url = `${API_BASE}${path}`;
-  const headers: any = { "Content-Type": "application/json", ...options?.headers };
+  const headers: Record<string, string> = { "Content-Type": "application/json", ...(options?.headers as Record<string, string>) };
   const token = getToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(url, { headers, ...mergedOpts });
@@ -84,12 +85,12 @@ export const api = {
   // Strategies
   listStrategies: () => request("/api/strategies/"),
   getStrategy: (id: string) => request(`/api/strategies/${id}`),
-  createStrategy: (data: { name: string; type: string; symbol?: string; config?: any }) =>
+  createStrategy: (data: { name: string; type: string; symbol?: string; config?: Record<string, unknown> }) =>
     request("/api/strategies/", {
       method: "POST",
       body: JSON.stringify(data),
     }),
-  updateStrategy: (id: string, data: { status?: string; config?: any }) =>
+  updateStrategy: (id: string, data: { status?: string; config?: Record<string, unknown> }) =>
     request(`/api/strategies/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
@@ -151,7 +152,7 @@ export const api = {
     daily_pnl?: number;
   }) => request("/api/analysis/risk-check", { method: "POST", body: JSON.stringify(data) }),
   // Backtest
-  runBacktest: (data: { strategy: string; symbol?: string; timeframe?: string; limit?: number; capital?: number; position_size?: number; trading_fee?: number; slippage?: number; params?: any }) =>
+  runBacktest: (data: { strategy: string; symbol?: string; timeframe?: string; limit?: number; capital?: number; position_size?: number; trading_fee?: number; slippage?: number; params?: Record<string, unknown> }) =>
     request("/api/backtest/run", { method: "POST", body: JSON.stringify(data) }),
   getBacktestData: (data: { symbol?: string; timeframe?: string; limit?: number }) =>
     request("/api/backtest/data", { method: "POST", body: JSON.stringify(data) }),
@@ -160,7 +161,7 @@ export const api = {
   getBacktestStats: () => request("/api/backtest/stats"),
 
   // AI Iteration
-  startIteration: (data: { goal: string; symbol?: string; timeframe?: string; variants?: number; max_rounds?: number; capital?: number; risk_constraints?: any }) =>
+  startIteration: (data: { goal: string; symbol?: string; timeframe?: string; variants?: number; max_rounds?: number; capital?: number; risk_constraints?: Record<string, unknown> }) =>
     request("/api/ai/iterate", { method: "POST", body: JSON.stringify(data) }),
   getIterationStatus: (taskId: string) =>
     request(`/api/ai/iterate/status/${taskId}`),

@@ -1,15 +1,15 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 
-type MessageHandler = (msg: any) => void;
+type MessageHandler = (msg: unknown) => void;
 
 const WS_URL = "ws://localhost:8000/ws/ticker";
 
 export function useRealtime(handlers: {
-  onTicker?: (data: any) => void;
-  onCandle?: (data: any) => void;
+  onTicker?: (data: Record<string, unknown>) => void;
+  onCandle?: (data: Record<string, unknown>) => void;
 }) {
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimerRef = useRef<any>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [connected, setConnected] = useState(false);
 
   const connect = useCallback(() => {

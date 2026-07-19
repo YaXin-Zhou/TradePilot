@@ -5,7 +5,7 @@
     "progress_pct": 0.0,
     "is_complete": false,
     "gates": [],
-    "started_at": "2026-07-19T11:29:45.516834+00:00",
+    "started_at": "2026-07-19T12:13:00.476740+00:00",
     "completed_at": ""
   },
   "test-flow-2": {
@@ -18,23 +18,23 @@
         "stage": "replay",
         "passed": true,
         "detail": "replay ok",
-        "timestamp": "2026-07-19T11:29:45.522362+00:00"
+        "timestamp": "2026-07-19T12:13:00.481977+00:00"
       },
       {
         "stage": "scientific",
         "passed": true,
         "detail": "sci ok",
-        "timestamp": "2026-07-19T11:29:45.523916+00:00"
+        "timestamp": "2026-07-19T12:13:00.483659+00:00"
       },
       {
         "stage": "production",
         "passed": true,
         "detail": "prod ok",
-        "timestamp": "2026-07-19T11:29:45.525876+00:00"
+        "timestamp": "2026-07-19T12:13:00.485097+00:00"
       }
     ],
-    "started_at": "2026-07-19T11:29:45.521151+00:00",
-    "completed_at": "2026-07-19T11:29:45.525894+00:00"
+    "started_at": "2026-07-19T12:13:00.480597+00:00",
+    "completed_at": "2026-07-19T12:13:00.485107+00:00"
   },
   "test-flow-3": {
     "strategy_id": "test-flow-3",
@@ -46,17 +46,17 @@
         "stage": "replay",
         "passed": true,
         "detail": "ok",
-        "timestamp": "2026-07-19T11:29:45.532038+00:00"
+        "timestamp": "2026-07-19T12:13:00.488840+00:00"
       },
       {
         "stage": "scientific",
         "passed": false,
         "detail": "pbo too high",
-        "timestamp": "2026-07-19T11:29:45.534268+00:00"
+        "timestamp": "2026-07-19T12:13:00.490115+00:00"
       }
     ],
-    "started_at": "2026-07-19T11:29:45.529704+00:00",
-    "completed_at": "2026-07-19T11:29:45.534275+00:00"
+    "started_at": "2026-07-19T12:13:00.487543+00:00",
+    "completed_at": "2026-07-19T12:13:00.490122+00:00"
   },
   "test-bt-1": {
     "strategy_id": "test-bt-1",
@@ -171,6 +171,66 @@
         "passed": true,
         "detail": "Scientific 验证通过：PBO=15.00%, DSR=1.80, NW t=2.50",
         "timestamp": "2026-07-19T11:29:45.538540+00:00"
+      },
+      {
+        "stage": "replay",
+        "passed": true,
+        "detail": "回放验证通过：15 笔交易，夏普 2.10",
+        "timestamp": "2026-07-19T11:58:58.118668+00:00"
+      },
+      {
+        "stage": "scientific",
+        "passed": true,
+        "detail": "Scientific 验证通过：PBO=15.00%, DSR=1.80, NW t=2.50",
+        "timestamp": "2026-07-19T11:58:58.120144+00:00"
+      },
+      {
+        "stage": "replay",
+        "passed": true,
+        "detail": "回放验证通过：15 笔交易，夏普 2.10",
+        "timestamp": "2026-07-19T12:05:55.762114+00:00"
+      },
+      {
+        "stage": "scientific",
+        "passed": true,
+        "detail": "Scientific 验证通过：PBO=15.00%, DSR=1.80, NW t=2.50",
+        "timestamp": "2026-07-19T12:05:55.764079+00:00"
+      },
+      {
+        "stage": "replay",
+        "passed": true,
+        "detail": "回放验证通过：15 笔交易，夏普 2.10",
+        "timestamp": "2026-07-19T12:07:14.877655+00:00"
+      },
+      {
+        "stage": "scientific",
+        "passed": true,
+        "detail": "Scientific 验证通过：PBO=15.00%, DSR=1.80, NW t=2.50",
+        "timestamp": "2026-07-19T12:07:14.878550+00:00"
+      },
+      {
+        "stage": "replay",
+        "passed": true,
+        "detail": "回放验证通过：15 笔交易，夏普 2.10",
+        "timestamp": "2026-07-19T12:11:43.301092+00:00"
+      },
+      {
+        "stage": "scientific",
+        "passed": true,
+        "detail": "Scientific 验证通过：PBO=15.00%, DSR=1.80, NW t=2.50",
+        "timestamp": "2026-07-19T12:11:43.302147+00:00"
+      },
+      {
+        "stage": "replay",
+        "passed": true,
+        "detail": "回放验证通过：15 笔交易，夏普 2.10",
+        "timestamp": "2026-07-19T12:13:00.492430+00:00"
+      },
+      {
+        "stage": "scientific",
+        "passed": true,
+        "detail": "Scientific 验证通过：PBO=15.00%, DSR=1.80, NW t=2.50",
+        "timestamp": "2026-07-19T12:13:00.493244+00:00"
       }
     ],
     "started_at": "2026-07-19T10:44:58.210867+00:00",

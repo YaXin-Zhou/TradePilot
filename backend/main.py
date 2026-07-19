@@ -19,6 +19,11 @@ from core.logger import log
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Phase 7.7: 启动时安全校验（生产模式默认 JWT 密钥 → 拒绝启动）
+    security_warnings = settings.validate_security()
+    for w in security_warnings:
+        log.warning(f"Security: {w}")
+
     await init_db()
     await load_exchange_config()
     try:

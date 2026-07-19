@@ -1,0 +1,23 @@
+# Python 项目配置 — ruff lint + 基本规范
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+extend-exclude = ["backend/ml/models", "backend/data"]
+
+[tool.ruff.lint]
+# 规则集：错误(E/F) + 命名(N) + 导入排序(I) + 简化(SIM) + 警告(W)
+select = ["E", "F", "N", "I", "SIM", "W"]
+ignore = [
+    "E501",   # 行长由 line-length 控制，不强制报错
+    "N805",   # 方法名风格（dataclass 第一参数 cls/self）
+    "N818",   # 异常名后缀（项目已有风格）
+    "SIM108", # 三元 vs if-else（可读性优先）
+]
+
+[tool.ruff.lint.per-file-ignores]
+"backend/tests/*" = ["N802", "N803"]  # 测试函数/变量名风格放宽
+"backend/db/models.py" = ["N805"]     # SQLAlchemy 模型方法
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

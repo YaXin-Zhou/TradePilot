@@ -24,28 +24,28 @@
 
 ### 0.1 密钥加密存储
 
-- [ ] 交易所 Secret / Passphrase 用 `cryptography.fernet` AES 加密后写入 DB
-- [ ] 加密密钥从环境变量 `ENCRYPTION_KEY` 读取（启动时若无则自动生成 32 字节随机 key）
-- [ ] 敏感字段在日志/错误消息中自动脱敏（`***` 替换）
-- [ ] `load_db_config.py` 解密逻辑同步更新
+- [x] 交易所 Secret / Passphrase 用 `cryptography.fernet` AES 加密后写入 DB
+- [x] 加密密钥从环境变量 `ENCRYPTION_KEY` 读取（启动时若无则自动生成 32 字节随机 key）
+- [x] 敏感字段在日志/错误消息中自动脱敏（`***` 替换）
+- [x] `load_db_config.py` 解密逻辑同步更新
 
 **文件：** `backend/db/models.py`、`backend/core/crypto.py`（新建）、`backend/api/settings.py`、`backend/load_db_config.py`
 
 ### 0.2 AI API Key 治理
 
-- [ ] DeepSeek API Key 不再从前端传入，改为后端环境变量 `DEEPSEEK_API_KEY`
-- [ ] `POST /api/ai/analyze` 移除 `api_key` 参数，引擎从 settings 读取
-- [ ] 前端 AI 分析页面移除 Key 输入框，只留策略描述
+- [x] DeepSeek API Key 不再从前端传入，改为后端环境变量 `DEEPSEEK_API_KEY`
+- [x] `POST /api/ai/analyze` 移除 `api_key` 参数，引擎从 settings 读取
+- [x] 前端 AI 分析页面移除 Key 输入框，只留策略描述
 
 **文件：** `backend/strategies/ai_strategy.py`、`backend/api/ai_strategy.py`、`frontend/pages/ai-strategy.tsx`
 
 ### 0.3 CORS + 基础设施安全
 
-- [ ] CORS `allow_origins` 从 `["*"]` 改为 `["http://localhost:3000", "http://127.0.0.1:3000"]`
-- [ ] 生产环境读取 `ALLOWED_ORIGINS` 环境变量
-- [ ] JWT Secret 生成策略：`secrets.token_urlsafe(32)` → 写入 `.env`
-- [ ] 注册端点增加密码强度校验（最��� 8 位、含数字+字母）
-- [ ] Rate Limiting：`slowapi` 中间件，全局 200 req/min + 敏感端点 10 req/min
+- [x] CORS `allow_origins` 从 `["*"]` 改为 `["http://localhost:3000", "http://127.0.0.1:3000"]`
+- [x] 生产环境读取 `ALLOWED_ORIGINS` 环境变量
+- [x] JWT Secret 生成策略：`secrets.token_urlsafe(32)` → 写入 `.env`
+- [x] 注册端点增加密码强度校验（最��� 8 位、含数字+字母）
+- [x] Rate Limiting：`slowapi` 中间件，全局 200 req/min + 敏感端点 10 req/min
 
 **文件：** `backend/main.py`、`backend/config.py`、`backend/auth/router.py`、`backend/core/limits.py`（新建）
 
@@ -273,16 +273,16 @@ class StrategyVariant(Base):
 
 ### 4.1 Regime 市场状态识别
 
-- [ ] `MarketRegimeDetector` 类，基于 50 周期 MA 斜率 + ATR 波动率，输出四种状态：
+- [x] `MarketRegimeDetector` 类，基于 50 周期 MA 斜率 + ATR 波动率，输出四种状态：
   - `TRENDING_UP`（强势上涨）→ `TRENDING_DOWN`（强势下跌）→ `RANGING_HIGH_VOL`（高波动震荡）→ `RANGING_LOW_VOL`（低波动震荡）
-- [ ] 实时计算并缓存（每 5 分钟刷新），通过 `/api/analysis/market-regime` 暴露
-- [ ] 前端状态栏显示当前 Regime + 置信度
+- [x] 实时计算并缓存（每 5 分钟刷新），通过 `/api/analysis/market-regime` 暴露
+- [x] 前端状态栏显示当前 Regime + 置信度
 
 **文件：** `backend/services/regime_detector.py`（新建）、`backend/api/analysis.py`
 
 ### 4.2 风控规则引擎
 
-- [ ] `RiskPolicy` 数据模型：每个 Regime 绑一套风控参数
+- [x] `RiskPolicy` 数据模型：每个 Regime 绑一套风控参数
   ```python
   {
     "regime": "TRENDING_UP",
@@ -294,23 +294,23 @@ class StrategyVariant(Base):
     "trailing_stop_pct": 3.0     # 移动止损
   }
   ```
-- [ ] 风控引擎在每次下单/策略启动时检查：
+- [x] 风控引擎在每次下单/策略启动时检查：
   1. 当前 Regime 是否允许该策略类型（如震荡策略不宜在强势趋势中运行）
   2. 仓位是否超限（总仓位 + 单策略仓位）
   3. 日亏损是否触达（触达则暂停所有策略）
   4. 策略间相关性是否过高（过高则自动降低权重）
-- [ ] 前端 `/settings/risk` 页面：可视化编辑每个 Regime 的风控参数，支持导入/导出 JSON
+- [x] 前端 `/settings/risk` 页面：可视化编辑每个 Regime 的风控参数，支持导入/导出 JSON
 
 **文件：** `backend/services/risk_engine.py`（新建）、`backend/db/models.py`、`frontend/pages/settings/risk.tsx`（新建）
 
 ### 4.3 止损升级
 
-- [ ] 硬止损：价格跌破固定百分比 → 市价平仓
-- [ ] 移动止损（Trailing Stop）：追踪最高价，回撤 N% 触发
-- [ ] 时间止损：持仓超过 N 小时未盈利 → 平仓
-- [ ] 波动率止损：ATR × N 为动态止损距离
+- [x] 硬止损：价格跌破固定百分比 → 市价平仓
+- [x] 移动止损（Trailing Stop）：追踪最高价，回撤 N% 触发
+- [x] 时间止损：持仓超过 N 小时未盈利 → 平仓
+- [x] 波动率止损：ATR × N 为动态止损距离
 
-- [ ] `grid_trading` 修复止损坏逻辑：止损触发 → 取消所有挂单 → **市价卖出所有持仓** → 停止运行
+- [x] `grid_trading` 修复止损坏逻辑：止损触发 → 取消所有挂单 → **市价卖出所有持仓** → 停止运行
 
 **文件：** `backend/core/risk.py`（重写）、`backend/services/stop_loss.py`（新建）、`D:\wenjian\xiangm\work\grid_trading\grid_bot.py`
 
@@ -322,29 +322,29 @@ class StrategyVariant(Base):
 
 ### 5.1 StrategyPool 基础架构
 
-- [ ] `StrategyPool` 类管理所有活跃策略及其权重
-- [ ] 每个策略记录：`weight`、`running_sharpe`、`drawdown`、`correlation_matrix`
-- [ ] 启停管理：手动暂停 / 自动休眠（连续亏损触发）/ 淘汰（Sharpe 归零）
-- [ ] 前端策略池仪表盘：表格 + 饼图 + 相关性热力图
+- [x] `StrategyPool` 类管理所有活跃策略及其权重
+- [x] 每个策略记录：`weight`、`running_sharpe`、`drawdown`、`correlation_matrix`
+- [x] 启停管理：手动暂停 / 自动休眠（连续亏损触发）/ 淘汰（Sharpe 归零）
+- [x] 前端策略池仪表盘：表格 + 饼图 + 相关性热力图
 
 **文件：** `backend/services/strategy_pool.py`（新建）
 
 ### 5.2 在线学习权重分配
 
-- [ ] 实现 Adaptive Fixed-Share Hedge 算法：
+- [x] 实现 Adaptive Fixed-Share Hedge 算法：
   1. 损失函数归一化（每个策略的损失映射到 [0,1]）
   2. η 学习率自适应（根据最近 N 个周期表现动态调整）
   3. 族内聚合（同类型策略先加权平均），族间 Hedge（族间用指数加权）
-- [ ] Sleeping Experts：当某策略的 Regime 不适配时自动休眠（weight → 0.01），不参与资金分配
-- [ ] 每天凌晨自动运行权重重分配
+- [x] Sleeping Experts：当某策略的 Regime 不适配时自动休眠（weight → 0.01），不参与资金分配
+- [x] 每天凌晨自动运行权重重分配
 
 **文件：** `backend/services/online_learner.py`（新建）
 
 ### 5.3 资金分配执行
 
-- [ ] `PortfolioAllocator`：根据策略池权重 × 总可用资金，分配每个策略的下单额度
-- [ ] 再平衡机制：每小时检查偏差 > 5% 则触发渐进式再平衡（非一次性调仓）
-- [ ] 前端组合页升级：显示各策略资金占比 + 贡献度分析
+- [x] `PortfolioAllocator`：根据策略池权重 × 总可用资金，分配每个策略的下单额度
+- [x] 再平衡机制：每小时检查偏差 > 5% 则触发渐进式再平衡（非一次性调仓）
+- [x] 前端组合页升级：显示各策略资金占比 + 贡献度分析
 
 **文件：** `backend/services/portfolio_allocator.py`（新建）
 
@@ -391,6 +391,68 @@ class StrategyVariant(Base):
 - [x] 移动端适配的响应式布局
 
 **文件：** `frontend/components/NotificationCenter.tsx`、`frontend/store/useNotificationStore.ts`、`frontend/lib/toast.ts`
+
+---
+
+## 阶段七：集成断层修复 + 工程加固（项目评价后续）
+
+> 基于 `PROJECT_REVIEW.md` 的全面评价（综合 76.5 / B+），针对 P0/P1/P2/P3 问题逐项修复。
+
+### 7.1 统一 StrategyType 枚举
+
+- [x] `db/models.py` 扩展为统一枚举（GRID/ML_SIGNAL/SMA_CROSS/CUSTOM/MA_CROSS/RSI/BOLLINGER/AI_GENERATED）
+- [x] `services/risk_engine.py` 删除本地 `StrategyType`，改为 `from db.models import StrategyType`
+- [x] 清理未使用的 `from enum import Enum` 导入
+
+**文件：** `backend/db/models.py`、`backend/services/risk_engine.py`
+
+### 7.2 修复 trading_service 集成断层
+
+- [x] `trading_service.py` 接入 `regime_detector.detect()` + `risk_engine.full_check()`
+- [x] 保留旧 `risk_manager.check_order()` 作为兜底（新引擎异常时回退）
+- [x] 新增 `_detect_regime()` / `_get_total_capital()` / `_enhanced_risk_check()` 辅助
+- [x] 手动下单视为 CUSTOM 策略，跳过入场 Sharpe 门槛
+
+**文件：** `backend/services/trading_service.py`
+
+### 7.3 修复 strategies/runner 集成断层
+
+- [x] `runner.py` 接入 `regime_detector` + `risk_engine` + `stop_loss_manager` + `portfolio_allocator`
+- [x] 去掉硬编码 `0.001` 下单数量（改用 `portfolio_allocator.allocate()` 计算）
+- [x] 修复 `except Exception: pass` 异常吞噬（改为 `log.error`）
+- [x] 接入 `StopLossManager` 四级止损状态机（每 tick check，触发则平仓）
+- [x] 维护 `_positions_usdt` / `_positions_qty` 持仓状态
+
+**文件：** `backend/strategies/runner.py`
+
+### 7.4 同步 MILESTONES.md 文档
+
+- [x] 勾选 Phase 0/4/5 所有复选框（代码已完成）
+- [x] 添加 Phase 7 章节
+
+### 7.5 添加 CI/CD + Lint 配置
+
+- [x] `.github/workflows/ci.yml`：pytest + tsc --noEmit
+- [x] `pyproject.toml` 配置 ruff（Python lint）
+- [x] `.eslintrc.json`（前端 lint）
+
+### 7.6 添加集成测试
+
+- [x] `tests/test_integration_trading.py`：下单→风控→成交全链路
+- [x] `tests/test_integration_runner.py`：策略 tick → 风控 → 止损全链路
+
+### 7.7 质量修复（JWT/Mock/异常吞噬/临时文件）
+
+- [x] JWT 密钥生产模式检查（默认密钥在非 DEBUG 模式拒绝启动）
+- [x] Mock 回退优化（保留但记录告警，后续可加 X-Mock 头）
+- [x] 删除临时脚本 `backend/_rewrite.py`
+- [x] 前端 TS `any` 类型修复
+
+### 7.8 全量测试 + 提交
+
+- [x] 全部测试通过
+- [x] TypeScript 编译 0 错误
+- [x] Git commit Phase 7
 
 ---
 

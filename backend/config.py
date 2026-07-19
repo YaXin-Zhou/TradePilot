@@ -69,6 +69,35 @@ class Settings:
     STOP_LOSS_PCT: float = 10.0
     MAX_OPEN_ORDERS: int = 50
 
+    # ------------------------------------------------------------------
+    # 安全校验（Phase 7.7）
+    # ------------------------------------------------------------------
+
+    JWT_DEFAULT_KEY: str = "ai_quant_jwt_secret_key_dev"
+
+    def validate_security(self) -> list[str]:
+        """启动时安全检查，返回告警列表（空=全部通过）。
+
+        生产模式（DEBUG=False）下使用默认 JWT 密钥 → 拒绝启动。
+        """
+        warnings: list[str] = []
+
+        if self.JWT_SECRET_KEY == self.JWT_DEFAULT_KEY:
+            if not self.DEBUG:
+                raise RuntimeError(
+                    "FATAL: JWT_SECRET_KEY 仍为默认值且非 DEBUG 模式。"
+                    "生产环境必须设置 JWT_SECRET_KEY 环境变量（>= 32 字符随机串）。"
+                )
+            else:
+                warnings.append(
+                    "JWT_SECRET_KEY 使用默认值（仅开发模式允许，生产前必须设置环境变量）"
+                )
+
+        if self.ENCRYPTION_KEY == "" and not self.DEBUG:
+            warnings.append("ENCRYPTION_KEY 未设置（生产建议显式配置）")
+
+        return warnings
+
 
 settings = Settings()
 

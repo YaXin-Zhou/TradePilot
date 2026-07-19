@@ -35,10 +35,17 @@ class OrderType(str, enum.Enum):
 
 
 class StrategyType(str, enum.Enum):
+    """统一策略类型枚举 — 全系统唯一来源（Phase 7.1 统一）"""
+    # 旧值（向后兼容已存数据）
     GRID = "grid"
     ML_SIGNAL = "ml_signal"
     SMA_CROSS = "sma_cross"
     CUSTOM = "custom"
+    # 新增（Phase 4 风控引擎所需）
+    MA_CROSS = "ma_cross"
+    RSI = "rsi"
+    BOLLINGER = "bollinger"
+    AI_GENERATED = "ai_generated"
 
 
 class StrategyStatus(str, enum.Enum):

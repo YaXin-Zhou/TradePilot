@@ -15,24 +15,16 @@ import math
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from enum import Enum
 from pathlib import Path
 from typing import Optional
 
 from core.logger import log
 from services.regime_detector import MarketRegime
+from db.models import StrategyType  # Phase 7.1: 统一枚举来源
 
 # ------------------------------------------------------------------
 # 数据模型
 # ------------------------------------------------------------------
-
-
-class StrategyType(str, Enum):
-    MA_CROSS = "ma_cross"
-    RSI = "rsi"
-    BOLLINGER = "bollinger"
-    GRID = "grid"
-    AI_GENERATED = "ai_generated"
 
 
 @dataclass
