@@ -60,11 +60,24 @@ async def retrain_ml_models():
                 log.error(f"ML retrain failed for {symbol}: {e}")
 
 
+async def ai_heartbeat():
+    """每6小时 AI 心跳审查策略池"""
+    try:
+        from tasks.ai_heartbeat import get_heartbeat
+        hb = get_heartbeat()
+        result = await hb.beat()
+        log.info(f"AI Heartbeat: cycle #{result.cycle} done, "
+                 f"{len(result.recommendations)} recommendations")
+    except Exception as e:
+        log.error(f"AI Heartbeat failed: {e}")
+
+
 def start_scheduler():
     scheduler.add_job(sync_market_data, IntervalTrigger(hours=1), id="sync_market_data", replace_existing=True)
     scheduler.add_job(retrain_ml_models, IntervalTrigger(hours=24), id="retrain_ml_models", replace_existing=True)
+    scheduler.add_job(ai_heartbeat, IntervalTrigger(hours=6), id="ai_heartbeat", replace_existing=True)
     scheduler.start()
-    log.info("Scheduler started (market data sync: 1h, ML retrain: 24h)")
+    log.info("Scheduler started (market data: 1h, ML retrain: 24h, AI heartbeat: 6h)")
 
 
 def stop_scheduler():

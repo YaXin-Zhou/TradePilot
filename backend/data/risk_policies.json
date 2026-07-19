@@ -1,0 +1,62 @@
+{
+  "TRENDING_UP": {
+    "regime": "TRENDING_UP",
+    "max_position_pct": 0.4,
+    "max_single_strategy_pct": 0.2,
+    "max_daily_loss_pct": 5.0,
+    "stop_loss_pct": 8.0,
+    "trailing_stop_pct": 3.0,
+    "min_sharpe_entry": 0.8,
+    "max_correlation": 0.7,
+    "time_stop_hours": 72,
+    "atr_stop_multiplier": 2.0,
+    "allowed_strategies": []
+  },
+  "TRENDING_DOWN": {
+    "regime": "TRENDING_DOWN",
+    "max_position_pct": 0.15,
+    "max_single_strategy_pct": 0.08,
+    "max_daily_loss_pct": 3.0,
+    "stop_loss_pct": 5.0,
+    "trailing_stop_pct": 2.0,
+    "min_sharpe_entry": 1.0,
+    "max_correlation": 0.6,
+    "time_stop_hours": 48,
+    "atr_stop_multiplier": 1.5,
+    "allowed_strategies": [
+      "rsi"
+    ]
+  },
+  "RANGING_HIGH_VOL": {
+    "regime": "RANGING_HIGH_VOL",
+    "max_position_pct": 0.2,
+    "max_single_strategy_pct": 0.1,
+    "max_daily_loss_pct": 4.0,
+    "stop_loss_pct": 6.0,
+    "trailing_stop_pct": 2.5,
+    "min_sharpe_entry": 0.7,
+    "max_correlation": 0.6,
+    "time_stop_hours": 48,
+    "atr_stop_multiplier": 2.5,
+    "allowed_strategies": [
+      "bollinger",
+      "grid"
+    ]
+  },
+  "RANGING_LOW_VOL": {
+    "regime": "RANGING_LOW_VOL",
+    "max_position_pct": 0.25,
+    "max_single_strategy_pct": 0.12,
+    "max_daily_loss_pct": 4.0,
+    "stop_loss_pct": 7.0,
+    "trailing_stop_pct": 2.0,
+    "min_sharpe_entry": 0.6,
+    "max_correlation": 0.65,
+    "time_stop_hours": 96,
+    "atr_stop_multiplier": 1.5,
+    "allowed_strategies": [
+      "grid",
+      "ma_cross"
+    ]
+  }
+}

@@ -150,3 +150,50 @@ def reset_learner(_user: dict = Depends(get_current_user)):
     """重置学习器"""
     online_learner.reset()
     return {"success": True}
+
+
+# ------------------------------------------------------------------
+# AI 心跳 (Heartbeat)
+# ------------------------------------------------------------------
+
+class HeartbeatTriggerRequest(BaseModel):
+    pass
+
+
+@router.post("/heartbeat/run")
+async def run_heartbeat(_user: dict = Depends(get_current_user)):
+    """手动触发一次 AI 心跳审查"""
+    try:
+        from tasks.ai_heartbeat import get_heartbeat
+        hb = get_heartbeat()
+        result = await hb.beat()
+        return {"success": True, "data": result.to_dict()}
+    except Exception as e:
+        return {"success": False, "error": str(e), "data": None}
+
+
+@router.get("/heartbeat/history")
+def get_heartbeat_history(
+    limit: int = 10,
+    _user: dict = Depends(get_current_user),
+):
+    """获取心跳历史"""
+    try:
+        from tasks.ai_heartbeat import get_heartbeat
+        hb = get_heartbeat()
+        history = hb.get_history(limit)
+        return {"success": True, "data": history}
+    except Exception as e:
+        return {"success": False, "error": str(e), "data": []}
+
+
+@router.get("/heartbeat/last")
+def get_heartbeat_last(_user: dict = Depends(get_current_user)):
+    """获取最近一次心跳结果"""
+    try:
+        from tasks.ai_heartbeat import get_heartbeat
+        hb = get_heartbeat()
+        last = hb.get_last_cycle()
+        return {"success": True, "data": last}
+    except Exception as e:
+        return {"success": False, "error": str(e), "data": None}

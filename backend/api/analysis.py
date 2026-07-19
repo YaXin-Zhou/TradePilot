@@ -1,4 +1,4 @@
-"""分析 API — 市场状态 / 风控策略"""
+"""分析 API — 市场状态 / 风控策略 / 弱信号 / 情绪"""
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
@@ -6,6 +6,9 @@ from auth.deps import get_current_user
 from services.market_service import get_ohlcv
 from services.regime_detector import regime_detector
 from services.risk_engine import risk_engine, RiskPolicy
+from services.feature_engine import weak_signal_engine
+from services.external_data import oi_fetcher, fear_greed_fetcher
+from services.news_sentiment import get_news_sentiment_engine
 
 router = APIRouter(prefix="/api/analysis", tags=["analysis"])
 
@@ -117,3 +120,113 @@ def check_risk(req: RiskCheckRequest, _user: dict = Depends(get_current_user)):
         user_id=_user.get("sub", "anonymous"),
     )
     return {"success": True, "data": result.to_dict()}
+
+
+# ------------------------------------------------------------------
+# 弱信号矩阵 (Weak Signal Matrix)
+# ------------------------------------------------------------------
+
+@router.get("/weak-signals")
+async def get_weak_signals(
+    symbol: str = Query("BTC/USDT"),
+    timeframe: str = Query("1h"),
+    _user: dict = Depends(get_current_user),
+):
+    """获取弱信号矩阵（多源数据 + PCA 降维）"""
+    try:
+        ohlcv, _ = get_ohlcv(symbol, timeframe, limit=200)
+
+        # 并行获取外部数据
+        oi_data = await oi_fetcher.fetch(symbol)
+        fg_data = await fear_greed_fetcher.fetch()
+
+        result = weak_signal_engine.compute(ohlcv, symbol, oi_data, fg_data)
+        return {"success": True, "data": result.to_dict()}
+    except Exception as e:
+        return {"success": False, "error": str(e), "data": None}
+
+
+@router.get("/feature-names")
+def get_feature_names(_user: dict = Depends(get_current_user)):
+    """获取所有 54 维弱信号特征名"""
+    from services.feature_engine import FeatureHub
+    all_names = FeatureHub.all_feature_names()
+    return {
+        "success": True,
+        "data": {
+            "total": len(all_names),
+            "categories": {
+                "momentum": FeatureHub.MOMENTUM_FEATURES,
+                "volatility": FeatureHub.VOLATILITY_FEATURES,
+                "volume": FeatureHub.VOLUME_FEATURES,
+                "oi": FeatureHub.OI_FEATURES,
+                "sentiment": FeatureHub.SENTIMENT_FEATURES,
+                "micro": FeatureHub.MICRO_FEATURES,
+            },
+        },
+    }
+
+
+# ------------------------------------------------------------------
+# 外部数据 (Fear & Greed + OI)
+# ------------------------------------------------------------------
+
+@router.get("/fear-greed")
+async def get_fear_greed(_user: dict = Depends(get_current_user)):
+    """获取恐惧贪婪指数"""
+    try:
+        data = await fear_greed_fetcher.fetch()
+        if data:
+            return {"success": True, "data": data.to_dict()}
+        return {"success": False, "error": "Failed to fetch Fear & Greed Index", "data": None}
+    except Exception as e:
+        return {"success": False, "error": str(e), "data": None}
+
+
+@router.get("/open-interest")
+async def get_open_interest(
+    symbol: str = Query("BTC/USDT"),
+    _user: dict = Depends(get_current_user),
+):
+    """获取 OKX 持仓数据"""
+    try:
+        data = await oi_fetcher.fetch(symbol)
+        if data:
+            return {"success": True, "data": data.to_dict()}
+        return {"success": False, "error": "Failed to fetch Open Interest", "data": None}
+    except Exception as e:
+        return {"success": False, "error": str(e), "data": None}
+
+
+# ------------------------------------------------------------------
+# 新闻情绪分析 (News Sentiment)
+# ------------------------------------------------------------------
+
+@router.get("/news-sentiment")
+async def get_news_sentiment(
+    symbol: str = Query("BTC/USDT"),
+    limit: int = Query(20, ge=5, le=50),
+    _user: dict = Depends(get_current_user),
+):
+    """获取新闻情绪分析"""
+    try:
+        engine = get_news_sentiment_engine()
+        report = await engine.analyze(symbol, news_limit=limit, use_ai=True)
+        return {"success": True, "data": report.to_dict()}
+    except Exception as e:
+        return {"success": False, "error": str(e), "data": None}
+
+
+@router.get("/news-sentiment/keyword")
+async def get_news_sentiment_keyword(
+    symbol: str = Query("BTC/USDT"),
+    limit: int = Query(20, ge=5, le=50),
+    _user: dict = Depends(get_current_user),
+):
+    """获取新闻情绪分析（仅关键词规则）"""
+    try:
+        engine = get_news_sentiment_engine()
+        report = await engine.analyze(symbol, news_limit=limit, use_ai=False)
+        return {"success": True, "data": report.to_dict()}
+    except Exception as e:
+        return {"success": False, "error": str(e), "data": None}

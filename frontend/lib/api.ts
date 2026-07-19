@@ -195,6 +195,24 @@ export const api = {
   rebalanceCapital: (data: { weights: Record<string, number>; total_capital: number; current_positions?: Record<string, number>; regime?: string }) =>
     request("/api/portfolio/rebalance", { method: "POST", body: JSON.stringify(data) }),
 
+  // Weak Signal Matrix
+  getWeakSignals: (symbol = "BTC/USDT", timeframe = "1h") =>
+    request(`/api/analysis/weak-signals?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}`),
+  getFeatureNames: () => request("/api/analysis/feature-names"),
+  getFearGreed: () => request("/api/analysis/fear-greed"),
+  getOpenInterest: (symbol = "BTC/USDT") =>
+    request(`/api/analysis/open-interest?symbol=${encodeURIComponent(symbol)}`),
+
+  // News Sentiment
+  getNewsSentiment: (symbol = "BTC/USDT", limit = 20) =>
+    request(`/api/analysis/news-sentiment?symbol=${encodeURIComponent(symbol)}&limit=${limit}`),
+
+  // AI Heartbeat
+  runHeartbeat: () => request("/api/strategies/heartbeat/run", { method: "POST" }),
+  getHeartbeatHistory: (limit = 10) =>
+    request(`/api/strategies/heartbeat/history?limit=${limit}`),
+  getHeartbeatLast: () => request("/api/strategies/heartbeat/last"),
+
   // Auth
   login: (username: string, password: string) =>
     request("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),

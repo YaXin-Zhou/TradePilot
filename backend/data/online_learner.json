@@ -1,0 +1,20 @@
+{
+  "eta": 0.1,
+  "iteration": 2,
+  "experts": {
+    "s1": {
+      "strategy_id": "s1",
+      "strategy_type": "unknown",
+      "weight": 0.4527,
+      "cumulative_loss": 2.0,
+      "is_sleeping": false
+    },
+    "s2": {
+      "strategy_id": "s2",
+      "strategy_type": "unknown",
+      "weight": 0.5473,
+      "cumulative_loss": 0.0,
+      "is_sleeping": false
+    }
+  }
+}

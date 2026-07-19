@@ -9,6 +9,7 @@ import { getToken, clearToken } from "../lib/api"
 import { useLanguage } from "../lib/LanguageContext";
 import { useExchangeStatus } from "../lib/swr-config";
 import { useAppStore } from "../store/useAppStore";
+import NotificationCenter from "./NotificationCenter";
 
 const NAV_ITEMS = [
   { label: "nav.dashboard", icon: LayoutDashboard, href: "/", color: "#00c076" },
@@ -26,6 +27,7 @@ const NAV_ITEMS = [
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const router = useRouter();
   const { t, lang, toggleLang } = useLanguage();
 
@@ -47,11 +49,21 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen overflow-hidden bg-dark-950">
+      {/* Mobile overlay */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 z-30 lg:hidden"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
       <aside
-        className={`flex flex-col border-r border-dark-800 bg-dark-900 transition-all duration-200 ${
-          collapsed ? "w-16" : "w-56"
-        }`}
+        className={`flex flex-col border-r border-dark-800 bg-dark-900 transition-all duration-200 z-40
+          ${collapsed ? "w-16" : "w-56"}
+          max-lg:fixed max-lg:left-0 max-lg:top-0 max-lg:h-full
+          ${mobileOpen ? "max-lg:translate-x-0" : "max-lg:-translate-x-full"}
+        `}
       >
         {/* Logo */}
         <div className="flex items-center gap-3 h-14 px-4 border-b border-dark-800">
@@ -123,10 +135,20 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <main className="flex-1 flex flex-col overflow-hidden bg-dark-950">
         {/* Top Bar */}
         <header className="flex items-center justify-between h-14 px-6 border-b border-dark-800 bg-dark-900/50">
-          <h1 className="text-sm font-medium text-dark-200">
+          <div className="flex items-center gap-3">
+            {/* Hamburger button (mobile) */}
+            <button
+              onClick={() => setMobileOpen(true)}
+              className="lg:hidden flex items-center justify-center w-8 h-8 rounded-lg hover:bg-dark-800 text-dark-300"
+            >
+              <Menu size={18} />
+            </button>
+            <h1 className="text-sm font-medium text-dark-200">
             {t(NAV_ITEMS.find((n) => n.href === router.pathname)?.label || "nav.dashboard")}
           </h1>
+          </div>
           <div className="flex items-center gap-4">
+            <NotificationCenter />
             <button
               onClick={toggleLang}
               className="btn-ghost flex items-center gap-1.5 text-xs py-1.5 px-3"
@@ -161,7 +183,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             </span>
           </div>
         )}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-4 lg:p-6">
           {children}
         </div>
       </main>

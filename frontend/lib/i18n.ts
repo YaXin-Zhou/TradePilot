@@ -256,6 +256,24 @@ const zh: Record<string, string> = {
   "ailab.failed": "失败",
   "ailab.history": "历史任务",
   "ailab.viewDetail": "查看详情",
+  // Notifications
+  "notif.title": "通知中心",
+  "notif.empty": "暂无通知",
+  "notif.markAll": "全部已读",
+  "notif.clear": "清空",
+  "notif.network": "网络",
+  "notif.exchange": "交易所",
+  "notif.risk": "风控",
+  "notif.success": "成功",
+  "notif.info": "信息",
+  // Heartbeat
+  "heartbeat.title": "AI 心跳",
+  "heartbeat.lastCycle": "上次心跳",
+  "heartbeat.runNow": "手动触发",
+  "heartbeat.history": "历史记录",
+  "heartbeat.recommendations": "调整建议",
+  "heartbeat.changes": "周期变化",
+  "heartbeat.noData": "暂无心跳数据",
 };
 
 const en: Record<string, string> = {
@@ -515,6 +533,24 @@ const en: Record<string, string> = {
   "ailab.failed": "Failed",
   "ailab.history": "Task History",
   "ailab.viewDetail": "View Details",
+  // Notifications
+  "notif.title": "Notifications",
+  "notif.empty": "No notifications",
+  "notif.markAll": "Mark all read",
+  "notif.clear": "Clear",
+  "notif.network": "Network",
+  "notif.exchange": "Exchange",
+  "notif.risk": "Risk",
+  "notif.success": "Success",
+  "notif.info": "Info",
+  // Heartbeat
+  "heartbeat.title": "AI Heartbeat",
+  "heartbeat.lastCycle": "Last Cycle",
+  "heartbeat.runNow": "Run Now",
+  "heartbeat.history": "History",
+  "heartbeat.recommendations": "Recommendations",
+  "heartbeat.changes": "Changes",
+  "heartbeat.noData": "No heartbeat data",
 };
 
 export type Lang = "zh" | "en";

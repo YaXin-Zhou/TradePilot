@@ -356,36 +356,41 @@ class StrategyVariant(Base):
 
 ### 6.1 弱信号矩阵
 
-- [ ] 引入外部数据源：OKX Open Interest（已有 CCXT 接口）、恐惧贪婪指数
-- [ ] FeatureEngine 从 23 个指标扩展到 50+ 个弱信号
-- [ ] 对信号矩阵做 PCA 降维 → 保留解释 95% 方差的主成分
-- [ ] 用降维后的信号矩阵替代原有 ML 特征输入
+- [x] 引入外部数据源：OKX Open Interest（已有 CCXT 接口）、恐惧贪婪指数
+- [x] FeatureEngine 从 23 个指标扩展到 50+ 个弱信号
+- [x] 对信号矩阵做 PCA 降维 → 保留解释 95% 方差的主成分
+- [x] 用降维后的信号矩阵替代原有 ML 特征输入
 
 **参照：** 《技术参考》第二章
+**文件：** `backend/services/feature_engine.py`、`backend/services/external_data.py`
 
 ### 6.2 Pulse 新闻情绪
 
-- [ ] 接入公开新闻源（CryptoPanic RSS / TradingView 热门）
-- [ ] 用 DeepSeek 做情感分析：bullish / bearish / neutral
-- [ ] 情绪分数作为辅助信号输入 Regime 检测器
+- [x] 接入公开新闻源（CryptoPanic RSS / TradingView 热门）
+- [x] 用 DeepSeek 做情感分析：bullish / bearish / neutral
+- [x] 情绪分数作为辅助信号输入 Regime 检测器
 
 **参照：** 《技术参考》第五章第 2 节
+**文件：** `backend/services/news_sentiment.py`
 
 ### 6.3 AI 心跳自迭代
 
-- [ ] 定时任务（每 6 小时）触发 AI 审查：
+- [x] 定时任务（每 6 小时）触发 AI 审查：
   - 读取当前策略池状态（各策略权重/Sharpe/回撤）
   - 对比上一周期的表现
   - 输出调整建议（降权/休眠/淘汰/新策略方向）
-- [ ] 调整建议经人工审核后执行（非自动执行）
+- [x] 调整建议经人工审核后执行（非自动执行）
 
 **参照：** 《技术参考》第五章第 3 节，"AI 不能直接实盘交易"
+**文件：** `backend/tasks/ai_heartbeat.py`
 
 ### 6.4 前端体验提升
 
-- [ ] 错误 Toast 分类：网络错误（黄色）/ 交易所错误（橙色）/ 风控拦截（红色）
-- [ ] 全局通知中心：策略异常、止损触发、迭代完成等事件汇总
-- [ ] 移动端适配的响应式布局
+- [x] 错误 Toast 分类：网络错误（黄色）/ 交易所错误（橙色）/ 风控拦截（红色）
+- [x] 全局通知中心：策略异常、止损触发、迭代完成等事件汇总
+- [x] 移动端适配的响应式布局
+
+**文件：** `frontend/components/NotificationCenter.tsx`、`frontend/store/useNotificationStore.ts`、`frontend/lib/toast.ts`
 
 ---
 
@@ -415,7 +420,10 @@ class StrategyVariant(Base):
 | 5.1 | 策略池基础 | 阶段五 | 3h | 🟢 P2 | 4.1 |
 | 5.2 | 在线学习权重 | 阶段五 | 4h | 🟢 P2 | 5.1 |
 | 5.3 | 资金分配执行 | 阶段五 | 3h | 🟢 P2 | 5.2 |
-| 6.x | 辅助模块 | 阶段六 | — | 🟢 P2 | 5.x |
+| 6.1 | 弱信号矩阵 | 阶段六 | 4h | 🟢 P2 | ✅ |
+| 6.2 | 新闻情绪分析 | 阶段六 | 3h | 🟢 P2 | ✅ |
+| 6.3 | AI 心跳自迭代 | 阶段六 | 3h | 🟢 P2 | ✅ |
+| 6.4 | 前端体验提升 | 阶段六 | 3h | 🟢 P2 | ✅ |
 
 ### 工时汇总
 
@@ -450,6 +458,10 @@ class StrategyVariant(Base):
 | Online Expert (AFH) | `online_learner.py` — 族内聚合+族间Hedge | 阶段五 5.2 |
 | Sleeping Experts | `online_learner.py` — Regime不适配自动休眠 | 阶段五 5.2 |
 | 移动止损 | `stop_loss.py` — Trailing Stop + ATR止损 | 阶段四 4.3 |
+| 弱信号矩阵 | `feature_engine.py` — 54维特征 + PCA降维(95%方差) | 阶段六 6.1 |
+| 新闻情绪分析 | `news_sentiment.py` — CryptoPanic + DeepSeek情感分类 | 阶段六 6.2 |
+| AI心跳审查 | `ai_heartbeat.py` — 6h定时审查+规则/DeepSeek双模式 | 阶段六 6.3 |
+| Toast分类通知 | `NotificationCenter.tsx` — 网络/交易所/风控三级分类 | 阶段六 6.4 |
 
 ### 明确不做的（理由充分）
 
@@ -458,8 +470,8 @@ class StrategyVariant(Base):
 | AI 直接实盘交易 | 《技术参考》明确警告：不可信任，必须落到程序 |
 | 随机森林/神经网络策略池 | 过拟合风险高/数据量不足 |
 | Rust 重写 | 现阶段 Python 够用，Rust 是系统稳定后的事 |
-| 弱信号矩阵（OI/链上） | P2，需先搞定验证体系再说 |
-| Pulse 新闻情绪 | P2，依赖外部数据源稳定性 |
+| ~~弱信号矩阵（OI/链上）~~ | ✅ Phase 6 已实现 |
+| ~~Pulse 新闻情绪~~ | ✅ Phase 6 已实现 |
 
 ---
 

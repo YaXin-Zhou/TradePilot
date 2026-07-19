@@ -1,0 +1,16 @@
+{
+  "s1": {
+    "id": "s1",
+    "name": "A",
+    "strategy_type": "ma_cross",
+    "weight": 0.0,
+    "running_sharpe": 0.0,
+    "running_max_dd": 0.0,
+    "status": "active",
+    "consecutive_losses": 0,
+    "total_trades": 0,
+    "allocated_capital": 0.0,
+    "last_updated": 1784460585.439474,
+    "return_series": []
+  }
+}
