@@ -2,8 +2,11 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional
+from datetime import datetime, timezone
 
 from db.models import Strategy, StrategyType, StrategyStatus
+from strategies.runner import runner
+from strategies.custom import CustomStrategy
 from db.database import async_session
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -102,6 +105,34 @@ async def update_strategy(strategy_id: str, req: StrategyUpdate):
         return {"success": True}
 
 
+@router.post("/{strategy_id}/start")
+async def start_strategy(strategy_id: str):
+    async with async_session() as session:
+        r = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
+        s = r.scalar_one_or_none()
+        if not s:
+            return {"success": False, "error": "not found"}
+        if s.type == StrategyType.CUSTOM:
+            instance = CustomStrategy(s.id, s.name, s.config)
+        elif s.type == StrategyType.GRID:
+            from strategies.grid import GridStrategy
+            instance = GridStrategy(s.id, s.name, s.config)
+        else:
+            return {"success": False, "error": "unsupported type"}
+        await runner.start(strategy_id, instance)
+        s.status = StrategyStatus.RUNNING
+        s.started_at = datetime.now(timezone.utc)
+        await session.commit()
+    return {"success": True}
+
+
+@router.post("/{strategy_id}/stop")
+async def stop_strategy(strategy_id: str):
+    await runner.stop(strategy_id)
+    return {"success": True}
+
+
+
 @router.delete("/{strategy_id}")
 async def delete_strategy(strategy_id: str):
     async with async_session() as session:
@@ -114,3 +145,33 @@ async def delete_strategy(strategy_id: str):
         await session.delete(s)
         await session.commit()
         return {"success": True}
+
+
+@router.post("/{strategy_id}/start")
+async def start_strategy(strategy_id: str):
+    async with async_session() as session:
+        r = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
+        s = r.scalar_one_or_none()
+        if not s:
+            return {"success": False, "error": "not found"}
+        if s.type == StrategyType.CUSTOM:
+            instance = CustomStrategy(s.id, s.name, s.config)
+        elif s.type == StrategyType.GRID:
+            from strategies.grid import GridStrategy
+            instance = GridStrategy(s.id, s.name, s.config)
+        else:
+            return {"success": False, "error": "unsupported type"}
+        await runner.start(strategy_id, instance)
+        s.status = StrategyStatus.RUNNING
+        s.started_at = datetime.now(timezone.utc)
+        await session.commit()
+    return {"success": True}
+
+
+@router.post("/{strategy_id}/stop")
+async def stop_strategy(strategy_id: str):
+    await runner.stop(strategy_id)
+    return {"success": True}
+
+
+
