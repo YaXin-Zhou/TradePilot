@@ -46,9 +46,8 @@ export default function SettingsPage() {
     try {
       const data: ExchangeSettingsData = await api.getExchangeSettings();
       setSettingsData(data);
-      // 已配置的显示脱敏值占位
-      if (data.testnet?.has_key) setTestnetForm((f) => ({ ...f, api_key: data.testnet.api_key }));
-      if (data.live?.has_key) setLiveForm((f) => ({ ...f, api_key: data.live.api_key }));
+      // 不回显脱敏值到输入框，避免用户误以为 Key 被截断或误覆盖。
+      // 输入框留空，placeholder 显示已配置的脱敏值 + "留空保持不变"提示。
       // 默认显示当前激活的标签页
       setActiveTab(data.active);
     } catch (e) {
@@ -60,7 +59,7 @@ export default function SettingsPage() {
     try {
       const data: any = await api.getDeepSeekSettings();
       setDsStatus(data);
-      if (data?.has_key) setDsKey(data.api_key);
+      // 不回显脱敏值到输入框，避免误覆盖
     } catch (e) {
       console.error("Load DeepSeek settings failed", e);
     }
@@ -73,6 +72,8 @@ export default function SettingsPage() {
     try {
       const res: any = await api.saveDeepSeekSettings({ api_key: dsKey });
       setDsMsg({ ok: res?.test_ok !== false, msg: res?.test_msg || t("settings.saved") });
+      // 保存成功后清空输入框
+      setDsKey("");
       await loadDeepSeek();
     } catch (e: any) {
       setDsMsg({ ok: false, msg: e.message || "Save failed" });
@@ -115,6 +116,8 @@ export default function SettingsPage() {
         passphrase: currentForm.passphrase,
       });
       setSavedMsg(res?.verify_msg || t("settings.saved"));
+      // 保存成功后清空输入框（后端对空值保留原 Key）
+      setCurrentForm({ api_key: "", secret: "", passphrase: "" });
       await loadSettings();
     } catch (e: any) {
       setSavedMsg(null);
@@ -231,7 +234,7 @@ export default function SettingsPage() {
               type="password"
               value={currentForm.api_key}
               onChange={(e) => setCurrentForm({ ...currentForm, api_key: e.target.value })}
-              placeholder={currentStatus?.has_key ? currentStatus.api_key : `Enter ${activeTab === "testnet" ? "testnet" : "live"} API key`}
+              placeholder={currentStatus?.has_key ? `${currentStatus.api_key}（已配置，留空保持不变）` : `请输入 ${activeTab === "testnet" ? "模拟盘" : "实盘"} API Key`}
               className="w-full"
             />
           </div>
@@ -241,7 +244,7 @@ export default function SettingsPage() {
               type="password"
               value={currentForm.secret}
               onChange={(e) => setCurrentForm({ ...currentForm, secret: e.target.value })}
-              placeholder={currentStatus?.has_secret ? "••••••••（已保存，输入新值覆盖）" : "Enter secret key"}
+              placeholder={currentStatus?.has_secret ? "••••••••（已保存，留空保持不变）" : "请输入 Secret Key"}
               className="w-full"
             />
           </div>
@@ -251,7 +254,7 @@ export default function SettingsPage() {
               type="password"
               value={currentForm.passphrase}
               onChange={(e) => setCurrentForm({ ...currentForm, passphrase: e.target.value })}
-              placeholder={currentStatus?.has_passphrase ? "••••••••（已保存，输入新值覆盖）" : "Enter passphrase"}
+              placeholder={currentStatus?.has_passphrase ? "••••••••（已保存，留空保持不变）" : "请输入 Passphrase"}
               className="w-full"
             />
           </div>
@@ -321,7 +324,7 @@ export default function SettingsPage() {
               type="password"
               value={dsKey}
               onChange={(e) => setDsKey(e.target.value)}
-              placeholder={dsStatus?.has_key ? dsStatus.api_key : "sk-xxxxxxxxxxxxxxxx"}
+              placeholder={dsStatus?.has_key ? `${dsStatus.api_key}（已配置，留空保持不变）` : "sk-xxxxxxxxxxxxxxxx"}
               className="w-full"
             />
           </div>

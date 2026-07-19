@@ -284,6 +284,11 @@ async def get_exchange_config(_user: dict = Depends(get_current_user)):
     }
 
 
+def _is_masked_or_empty(value: str) -> bool:
+    """判断值是否为空或脱敏占位符（含 *）。这类值应保留原 DB 值不覆盖。"""
+    return not value or "*" in value
+
+
 @router.post("/exchange")
 async def save_exchange_config(
     req: ExchangeConfigRequest,
@@ -291,34 +296,43 @@ async def save_exchange_config(
 ):
     """保存指定模式（testnet/live）的 API Key 配置。
 
+    如果某字段为空或为脱敏占位符（含 *），则保留 DB 原值不覆盖。
     如果保存的是当前 active 模式，保存后自动热重建 exchange。
     """
     mode = req.mode if req.mode in ("testnet", "live") else "testnet"
     is_testnet = (mode == "testnet")
 
-    # 1. 校验 API Key 权限（如果提供了完整 Key）
+    # 1. 读取现有配置，合并字段（空/脱敏值保留原值）
+    data = await _read_config_async()
+    existing_creds = data.get(mode, {})
+    existing_api_key, existing_secret, existing_passphrase = _get_creds_plaintext(existing_creds)
+
+    final_api_key = existing_api_key if _is_masked_or_empty(req.api_key) else req.api_key
+    final_secret = existing_secret if _is_masked_or_empty(req.secret) else req.secret
+    final_passphrase = existing_passphrase if _is_masked_or_empty(req.passphrase) else req.passphrase
+
+    # 2. 校验 API Key 权限（仅当有完整 Key 时）
     verify_msg = ""
-    if req.api_key and req.secret and req.verify_permissions:
-        ok, verify_msg = _verify_api_key_permissions(req.api_key, req.secret, req.passphrase, is_testnet)
+    if final_api_key and final_secret and req.verify_permissions:
+        ok, verify_msg = _verify_api_key_permissions(final_api_key, final_secret, final_passphrase, is_testnet)
         if not ok:
             return {"success": False, "error": f"API Key 校验失败: {verify_msg}"}
         log.info(f"API Key verified ({mode}): {verify_msg}")
 
-    # 2. 读取现有配置，更新对应模式
-    data = await _read_config_async()
+    # 3. 写入合并后的配置
     data[mode] = {
-        "api_key_enc": encrypt(req.api_key),
-        "secret_enc": encrypt(req.secret),
-        "passphrase_enc": encrypt(req.passphrase),
+        "api_key_enc": encrypt(final_api_key),
+        "secret_enc": encrypt(final_secret),
+        "passphrase_enc": encrypt(final_passphrase),
         "testnet": is_testnet,
     }
     await _write_config(data)
 
-    # 3. 如果保存的是当前 active 模式，热重建
+    # 4. 如果保存的是当前 active 模式，热重建
     rebuilt = False
     rebuild_msg = "未激活模式，无需热重建"
     if data.get("active") == mode:
-        rebuilt, rebuild_msg = await _rebuild_exchange(req.api_key, req.secret, req.passphrase, is_testnet)
+        rebuilt, rebuild_msg = await _rebuild_exchange(final_api_key, final_secret, final_passphrase, is_testnet)
 
     return {
         "success": True,
@@ -328,6 +342,7 @@ async def save_exchange_config(
             "rebuild_msg": rebuild_msg,
             "verify_msg": verify_msg,
             "active": data.get("active"),
+            "preserved_fields": _is_masked_or_empty(req.api_key) or _is_masked_or_empty(req.secret) or _is_masked_or_empty(req.passphrase),
         },
     }
 
@@ -480,19 +495,32 @@ async def save_deepseek_config(
     req: DeepSeekConfigRequest,
     _user: dict = Depends(get_current_user),
 ):
-    """保存 DeepSeek API Key（加密存 DB + 热更新全局 settings）"""
-    if not req.api_key:
-        return {"success": False, "error": "请提供 DeepSeek API Key"}
+    """保存 DeepSeek API Key（加密存 DB + 热更新全局 settings）
+
+    如果 api_key 为空或为脱敏占位符（含 *），保留 DB 原值不覆盖。
+    """
+    # 读取现有配置，空/脱敏值保留原值
+    existing = await _read_deepseek_config()
+    existing_key = decrypt(existing.get("api_key_enc", "")) if existing.get("api_key_enc") else ""
+
+    if _is_masked_or_empty(req.api_key):
+        if not existing_key:
+            return {"success": False, "error": "请提供 DeepSeek API Key"}
+        final_key = existing_key
+        preserved = True
+    else:
+        final_key = req.api_key
+        preserved = False
 
     # 可选：保存前测试一次（失败仍允许保存，仅警告）
-    test_ok, test_msg = _test_deepseek_key(req.api_key)
+    test_ok, test_msg = _test_deepseek_key(final_key)
 
     # 加密存储
-    await _write_deepseek_config({"api_key_enc": encrypt(req.api_key)})
+    await _write_deepseek_config({"api_key_enc": encrypt(final_key)})
 
     # 热更新全局 settings，所有使用方立即生效
-    global_settings.DEEPSEEK_API_KEY = req.api_key
-    log.info("DeepSeek API Key updated and saved to DB")
+    global_settings.DEEPSEEK_API_KEY = final_key
+    log.info(f"DeepSeek API Key saved to DB (preserved={preserved})")
 
     return {
         "success": True,
@@ -501,6 +529,7 @@ async def save_deepseek_config(
             "test_ok": test_ok,
             "test_msg": test_msg,
             "source": "DB",
+            "preserved": preserved,
         },
     }
 
