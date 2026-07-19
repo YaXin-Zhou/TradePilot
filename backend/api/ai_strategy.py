@@ -12,21 +12,31 @@ from config import settings
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
 
-
 _fe = FeatureEngine()
 
 
 class AnalyzeRequest(BaseModel):
-    api_key: str
     auto: bool = False
     name: str = ""
-    strategy_desc: str
+    strategy_desc: str = ""
     symbol: str = "BTC/USDT"
     timeframe: str = "1h"
 
 
+def _get_ai_engine() -> AIStrategyEngine | None:
+    """从后端配置创建 AI 引擎，Key 不可用时返回 None"""
+    key = settings.DEEPSEEK_API_KEY
+    if not key:
+        return None
+    return AIStrategyEngine(api_key=key)
+
+
 @router.post("/analyze")
 async def ai_analyze(req: AnalyzeRequest, _user: dict = Depends(get_current_user)):
+    engine = _get_ai_engine()
+    if engine is None:
+        return {"success": False, "error": "DeepSeek API Key 未配置，请在 .env 中设置 DEEPSEEK_API_KEY"}
+
     try:
         ticker = _exchange.fetch_ticker(req.symbol)
         df = _exchange.fetch_ohlcv(req.symbol, req.timeframe, limit=100)
@@ -46,7 +56,6 @@ async def ai_analyze(req: AnalyzeRequest, _user: dict = Depends(get_current_user
             "atr": round(float(latest.get("atr_14", 0)), 2),
             "volume_ratio": round(float(latest.get("volume_ratio", 0)), 2),
         }
-        engine = AIStrategyEngine(api_key=req.api_key)
         if req.auto:
             signal, strategy_info = await engine.auto_analyze({"ticker": ticker, "indicators": indicators})
         else:
@@ -94,16 +103,17 @@ async def ai_analyze(req: AnalyzeRequest, _user: dict = Depends(get_current_user
 
 
 @router.post("/test-connection")
-async def test_connection(data: dict):
-    api_key = data.get("api_key", "")
-    if not api_key:
-        return {"success": False, "error": "No API key"}
+async def test_connection():
+    """测试后端 DeepSeek API Key 是否有效"""
+    key = settings.DEEPSEEK_API_KEY
+    if not key:
+        return {"success": False, "error": "DEEPSEEK_API_KEY 未配置"}
     import httpx
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
                 "https://api.deepseek.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                 json={"model": "deepseek-chat", "messages": [{"role": "user", "content": "ping"}], "max_tokens": 5},
             )
             if resp.status_code == 200:
@@ -111,5 +121,3 @@ async def test_connection(data: dict):
             return {"success": False, "error": f"API returned {resp.status_code}"}
     except Exception as e:
         return {"success": False, "error": str(e)[:100]}
-
-

@@ -1,8 +1,9 @@
-"""Load exchange config from DB on startup"""
+"""Load exchange config from DB on startup (with decryption)"""
 import json
 from sqlalchemy import select
 from db.database import async_session
 from db.models import AppConfig
+from core.crypto import decrypt
 
 
 async def load_exchange_config():
@@ -14,14 +15,18 @@ async def load_exchange_config():
             row = r.scalar_one_or_none()
             if row and row.value:
                 data = json.loads(row.value)
-                if data.get("api_key") and data.get("secret"):
+                # 优先读取加密字段，回退到旧版明文字段（兼容）
+                api_key = decrypt(data.get("api_key_enc", "")) or data.get("api_key", "")
+                secret = decrypt(data.get("secret_enc", "")) or data.get("secret", "")
+                passphrase = decrypt(data.get("passphrase_enc", "")) or data.get("passphrase", "")
+                if api_key and secret:
                     from core.exchange import ExchangeClient
                     from config import settings as _s
                     client = ExchangeClient(
                         exchange_name=_s.EXCHANGE_NAME,
-                        api_key=data["api_key"],
-                        secret=data["secret"],
-                        passphrase=data.get("passphrase", ""),
+                        api_key=api_key,
+                        secret=secret,
+                        passphrase=passphrase,
                         testnet=data.get("testnet", True),
                     )
                     import core.exchange as exmod

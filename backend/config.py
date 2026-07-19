@@ -36,12 +36,20 @@ class Settings:
     HTTPS_PROXY: str = os.getenv("HTTPS_PROXY", "")
     HTTP_PROXY: str = os.getenv("HTTP_PROXY", "")
 
+    # 加密密钥 (Fernet AES)
+    ENCRYPTION_KEY: str = os.getenv("ENCRYPTION_KEY", "")
+
+    # AI
+    DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
+
     # JWT
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "ai_quant_jwt_secret_key_dev")
     JWT_EXPIRE_MINUTES: int = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))
 
-    # CORS
-    CORS_ORIGINS: list[str] = os.getenv("CORS_ORIGINS", "*").split(",")
+    # CORS — 默认仅允许本地开发域名
+    CORS_ORIGINS: list[str] = os.getenv(
+        "CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
+    ).split(",")
 
     # 策略默认参数
     DEFAULT_GRID_LOWER: float = 83000.0

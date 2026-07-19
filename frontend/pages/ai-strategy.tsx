@@ -1,52 +1,32 @@
 import { useState, useEffect } from "react";
 import { api } from "../lib/api";
 import { useLanguage } from "../lib/LanguageContext";
-import { Brain, Send, Zap, Key, RefreshCw, TrendingUp, TrendingDown, Minus, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { Brain, Send, Zap, RefreshCw, TrendingUp, TrendingDown, Minus, ArrowUpRight, ArrowDownRight } from "lucide-react";
 
 
 export default function AIStrategyPage() {
-  const [apiKey, setApiKey] = useState("");
   const [strategy, setStrategy] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [ticker, setTicker] = useState<any>(null);
-  const [connected, setConnected] = useState(false);
-  const [keySaved, setKeySaved] = useState(false);
+  const [connected, setConnected] = useState<boolean | null>(null);
   const [balance, setBalance] = useState<any>(null);
   const [orderAmount, setOrderAmount] = useState(100);
-  const [orderType, setOrderType] = useState("market");
   const [placingOrder, setPlacingOrder] = useState(false);
   const [placedOrder, setPlacedOrder] = useState<any>(null);
 
   useEffect(() => {
-    const saved = localStorage.getItem("deepseek_key");
-    if (saved) setApiKey(saved);
     api.getTicker().then(setTicker).catch(() => {});
     api.getBalance().then(setBalance).catch(() => {});
+    api.testAIConnection("").then(() => setConnected(true)).catch(() => setConnected(false));
   }, []);
 
-  const saveKey = () => {
-    localStorage.setItem("deepseek_key", apiKey);
-    setKeySaved(true);
-    setTimeout(() => setKeySaved(false), 2000);
-  };
-
-  const testConnection = async () => {
-    if (!apiKey) return;
-    try {
-      await api.testAIConnection(apiKey);
-      setConnected(true);
-    } catch (e: any) {
-      setConnected(false);
-    }
-  };
-
   const analyze = async () => {
-    if (!apiKey || !strategy.trim()) return;
+    if (!strategy.trim()) return;
     setLoading(true);
     setResult(null);
     try {
-      const res = await api.aiAnalyze({ api_key: apiKey, strategy_desc: strategy });
+      const res = await api.aiAnalyze({ strategy_desc: strategy, auto: false } as any);
       setResult(res);
     } catch (e: any) {
       setResult({ error: e.message });
@@ -68,11 +48,10 @@ export default function AIStrategyPage() {
   };
 
   const autoAnalyze = async () => {
-    if (!apiKey) return;
     setLoading(true);
     setResult(null);
     try {
-      const res = await api.aiAnalyze({ api_key: apiKey, strategy_desc: "", auto: true });
+      const res = await api.aiAnalyze({ strategy_desc: "", auto: true } as any);
       setResult(res);
     } catch (e: any) {
       setResult({ error: e.message });
@@ -92,29 +71,27 @@ export default function AIStrategyPage() {
     <div className="space-y-6">
       <div><h2 className="text-lg font-semibold text-white">AI Strategy</h2><p className="text-xs text-dark-400 mt-1">AI generates strategies with automatic backtesting</p></div>
 
+      {/* AI 连接状态指示 */}
+      <div className="card py-2 px-4 flex items-center gap-2">
+        <Zap size={14} className={connected === true ? "text-green" : connected === false ? "text-red" : "text-dark-500"} />
+        <span className="text-xs text-dark-300">
+          {connected === true ? "DeepSeek API 已连接" : connected === false ? "DeepSeek API 未配置，请在 .env 设置 DEEPSEEK_API_KEY" : "检测 DeepSeek 连接..."}
+        </span>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="space-y-4">
-          <div className="card">
-            <div className="flex items-center gap-2 mb-3"><Key size={16} className="text-purple-400" /><span className="text-sm font-semibold text-white">DeepSeek API Key</span></div>
-            <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." className="w-full" />
-            <div className="flex gap-2 mt-2">
-              <button onClick={saveKey} className="btn-ghost text-xs py-1.5">{keySaved ? "Saved!" : "Save Key"}</button>
-              <button onClick={testConnection} className="btn-ghost text-xs py-1.5 flex items-center gap-1"><Zap size={12} /> Test</button>
-              {connected && <span className="text-xs text-green flex items-center">Connected</span>}
-            </div>
-          </div>
-
           <div className="card">
             <div className="flex items-center gap-2 mb-3"><Brain size={16} className="text-indigo-400" /><span className="text-sm font-semibold text-white">Strategy Description</span></div>
             <textarea value={strategy} onChange={(e) => setStrategy(e.target.value)}
               placeholder="Buy when RSI(14) < 30 and price above EMA200&#10;Sell when RSI(14) > 70&#10;Position size: 10%&#10;Stop loss: 2%"
               className="w-full h-32 resize-none text-sm" style={{fontFamily:"monospace"}} />
-            <button onClick={analyze} disabled={loading || !apiKey || !strategy.trim()}
+            <button onClick={analyze} disabled={loading || !strategy.trim()}
               className="btn-primary flex items-center gap-2 text-sm mt-3 w-full justify-center">
               {loading ? <RefreshCw size={16} className="animate-spin" /> : <Send size={16} />}
               {loading ? "Analyzing and Backtesting..." : "Analyze and Backtest"}
             </button>
-            <button onClick={autoAnalyze} disabled={loading || !apiKey} className="btn-ghost w-full flex items-center justify-center gap-2 text-sm py-2.5 mt-2">
+            <button onClick={autoAnalyze} disabled={loading} className="btn-ghost w-full flex items-center justify-center gap-2 text-sm py-2.5 mt-2">
               <Zap size={14} /> Auto Analyze
             </button>
           </div>
@@ -259,5 +236,3 @@ export default function AIStrategyPage() {
     </div>
   );
 }
-
-

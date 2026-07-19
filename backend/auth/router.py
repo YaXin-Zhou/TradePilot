@@ -10,8 +10,24 @@ from db.models import User as UserModel
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
+def _validate_password(password: str) -> str | None:
+    """校验密码强度。返回 None 表示通过，否则返回错误消息。"""
+    if len(password) < 8:
+        return "Password must be at least 8 characters"
+    if not any(c.isdigit() for c in password):
+        return "Password must contain at least one digit"
+    if not any(c.isalpha() for c in password):
+        return "Password must contain at least one letter"
+    return None
+
+
 @router.post("/register", response_model=TokenResponse)
 async def register(req: RegisterRequest, session=Depends(get_session)):
+    # 密码强度校验
+    err = _validate_password(req.password)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+
     existing = await session.execute(select(UserModel).where(UserModel.name == req.username))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Username already exists")

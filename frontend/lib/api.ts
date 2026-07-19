@@ -102,16 +102,16 @@ export const api = {
     request(`/api/strategies/${id}`, { method: "DELETE" }),
 
 
-  // AI Strategy
-  aiAnalyze: (data: { api_key: string; strategy_desc: string; symbol?: string; timeframe?: string; auto?: boolean }) =>
+  // AI Strategy (API Key 由后端管理，前端不再传入)
+  aiAnalyze: (data: { strategy_desc: string; symbol?: string; timeframe?: string; auto?: boolean }) =>
     request("/api/ai/analyze", {
       method: "POST",
       body: JSON.stringify(data),
     }),
-  testAIConnection: (apiKey: string) =>
+  testAIConnection: () =>
     request("/api/ai/test-connection", {
       method: "POST",
-      body: JSON.stringify({ api_key: apiKey }),
+      body: JSON.stringify({}),
     }),
   // Analysis
   getIndicators: (symbol = "BTC/USDT", timeframe = "1h") =>

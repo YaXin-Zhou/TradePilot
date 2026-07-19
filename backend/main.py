@@ -12,6 +12,7 @@ from config import settings
 from db.database import init_db, close_db
 from tasks.scheduler import start_scheduler, stop_scheduler
 from load_db_config import load_exchange_config
+from core.rate_limiter import rate_limit_middleware
 
 
 @asynccontextmanager
@@ -34,14 +35,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS
+# CORS — 白名单模式，仅允许配置的域名
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
-    
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 速率限制中间件
+app.middleware("http")(rate_limit_middleware)
 
 # 注册路由
 from api.market import router as market_router
