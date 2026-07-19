@@ -25,19 +25,19 @@ from db.models import Order, AuditLog, OrderType, OrderStatus, StrategyType
 
 # ------------------------------------------------------------------
 # M3: 下单落库 + 审计写入
+# P1-2: DB 写入失败不再静默吞掉 — 重试 + 补偿审计 + 内存队列
 # ------------------------------------------------------------------
 
-async def _record_order_success(
-    user_id: str,
-    account_id: str,
-    symbol: str,
-    side: str,
-    amount: float,
-    order_result: dict,
-    order_type: OrderType,
+_pending_order_records: list[dict] = []   # DB 写入失败的订单记录（调度器补偿）
+_PERSIST_RETRY_DELAY = 0.5               # 重试延迟（秒）
+
+
+async def _do_record_order_success(
+    user_id: str, account_id: str, symbol: str, side: str,
+    amount: float, order_result: dict, order_type: OrderType,
     idempotency_key: str,
-):
-    """下单成功后原子写 orders + audit_logs（同一事务）"""
+) -> bool:
+    """实际执行订单落库（原子写 orders + audit_logs），返回是否成功"""
     try:
         async with async_session() as session:
             status_str = order_result.get("status") or "open"
@@ -79,42 +79,142 @@ async def _record_order_success(
             session.add_all([order_record, audit])
             await session.commit()
             log.info(f"Order recorded: {order_result.get('id')} (account={account_id})")
+            return True
     except Exception as e:
-        log.error(f"Failed to record order (non-fatal): {e}")
+        log.warning(f"Order persist attempt failed: {e}")
+        return False
 
 
-async def _record_order_failure(
-    user_id: str,
-    account_id: str,
-    symbol: str,
-    side: str,
-    amount: float,
-    order_type: OrderType,
+async def _record_order_success(
+    user_id: str, account_id: str, symbol: str, side: str,
+    amount: float, order_result: dict, order_type: OrderType,
     idempotency_key: str,
-    error: str,
 ):
-    """下单失败时写 audit_logs（result=error）"""
+    """下单成功后原子写 orders + audit_logs。
+
+    P1-2: DB 写入失败不再静默吞掉 — 重试一次，仍失败则写补偿审计日志（result=db_persist_failed），
+    若审计日志也失败则入内存队列等调度器补偿。
+    资金对账断裂风险已消除：订单在交易所真实存在，本地记录可通过补偿恢复。
+    """
+    # 第一次尝试
+    if await _do_record_order_success(
+        user_id, account_id, symbol, side, amount, order_result, order_type, idempotency_key
+    ):
+        return
+
+    # 重试一次（可能是临时网络抖动）
+    await asyncio.sleep(_PERSIST_RETRY_DELAY)
+    if await _do_record_order_success(
+        user_id, account_id, symbol, side, amount, order_result, order_type, idempotency_key
+    ):
+        return
+
+    # 两次都失败 — 写补偿审计日志（标记 db_persist_failed）
+    log.error(
+        f"CRITICAL: Order persist FAILED after retry — "
+        f"exchange_id={order_result.get('id')} symbol={symbol} side={side} amount={amount}. "
+        f"Order is REAL on exchange but NOT in local DB — reconciliation broken, queuing for retry"
+    )
     try:
         async with async_session() as session:
             audit = AuditLog(
                 actor=user_id or "system",
                 action="place_order",
                 entity_type="order",
+                entity_id=str(order_result.get("id", "")),
                 detail={
                     "idempotency_key": idempotency_key,
-                    "symbol": symbol,
-                    "side": side,
-                    "amount": amount,
-                    "account_id": account_id,
-                    "order_type": order_type.value,
+                    "symbol": symbol, "side": side, "amount": amount,
+                    "account_id": account_id, "order_type": order_type.value,
+                    "order_result": order_result,
+                    "PERSIST_FAILED": True,
                 },
-                result="error",
-                error_msg=error,
+                result="db_persist_failed",
+                error_msg="Order placed on exchange but DB persist failed after retry",
             )
             session.add(audit)
             await session.commit()
-    except Exception as e:
-        log.error(f"Failed to record audit (non-fatal): {e}")
+    except Exception as e2:
+        # DB 完全不可用 — 入内存队列等调度器补偿
+        log.error(f"CRITICAL: Even audit log failed — enqueuing for scheduler retry: {e2}")
+        _pending_order_records.append({
+            "user_id": user_id, "account_id": account_id,
+            "symbol": symbol, "side": side, "amount": amount,
+            "order_result": order_result, "order_type": order_type,
+            "idempotency_key": idempotency_key,
+            "enqueued_at": time.time(),
+        })
+
+
+async def _record_order_failure(
+    user_id: str, account_id: str, symbol: str, side: str,
+    amount: float, order_type: OrderType, idempotency_key: str, error: str,
+):
+    """下单失败时写 audit_logs（result=error）。
+
+    P1-2: DB 写入失败重试一次，仍失败则 log.error（不再静默吞掉）。
+    """
+    for attempt in range(2):
+        try:
+            async with async_session() as session:
+                audit = AuditLog(
+                    actor=user_id or "system",
+                    action="place_order",
+                    entity_type="order",
+                    detail={
+                        "idempotency_key": idempotency_key,
+                        "symbol": symbol, "side": side, "amount": amount,
+                        "account_id": account_id, "order_type": order_type.value,
+                    },
+                    result="error",
+                    error_msg=error,
+                )
+                session.add(audit)
+                await session.commit()
+                return
+        except Exception as e:
+            if attempt == 0:
+                log.warning(f"Audit persist failed, retrying: {e}")
+                await asyncio.sleep(_PERSIST_RETRY_DELAY)
+            else:
+                log.error(f"CRITICAL: Audit persist FAILED after retry — order failure not recorded: {e}")
+
+
+async def flush_pending_order_records() -> int:
+    """P1-2: 调度器定期补偿 — 重试 DB 写入失败的订单记录。
+
+    返回成功补偿的记录数。由 scheduler 每 30 秒调用。
+    """
+    if not _pending_order_records:
+        return 0
+
+    flushed = 0
+    remaining = []
+    for record in _pending_order_records:
+        success = await _do_record_order_success(
+            record["user_id"], record["account_id"], record["symbol"],
+            record["side"], record["amount"], record["order_result"],
+            record["order_type"], record["idempotency_key"],
+        )
+        if success:
+            flushed += 1
+            log.info(f"Pending order record flushed: {record['order_result'].get('id')}")
+        else:
+            # 超过 5 分钟的记录放弃（避免无限堆积）
+            if time.time() - record.get("enqueued_at", 0) > 300:
+                log.error(
+                    f"CRITICAL: Pending order record EXPIRED after 5min — "
+                    f"exchange_id={record['order_result'].get('id')} will need manual reconciliation"
+                )
+            else:
+                remaining.append(record)
+
+    _pending_order_records.clear()
+    _pending_order_records.extend(remaining)
+
+    if flushed > 0:
+        log.info(f"Pending order records: flushed {flushed}, remaining {len(remaining)}")
+    return flushed
 
 
 def _make_idempotency_key(account_id: str, symbol: str, side: str, amount: float) -> str:

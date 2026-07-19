@@ -86,6 +86,7 @@ class StrategyRunner:
         self._positions_usdt: Dict[str, float] = {}   # sid → 已分配资金 (USDT)
         self._positions_qty: Dict[str, float] = {}    # sid → 持仓数量 (币)
         self._state_loaded = False
+        self._persist_fail_count: Dict[str, int] = {}  # P1-2: 持久化失败计数（连续失败告警）
 
     # ------------------------------------------------------------------
     # M4: 状态持久化（DB 替代 JSON）
@@ -197,8 +198,19 @@ class StrategyRunner:
                     row.extra = {"positions_usdt": positions_usdt}
 
                 await session.commit()
+                # P1-2: 成功后清除失败计数
+                self._persist_fail_count.pop(sid, None)
         except Exception as e:
-            log.error(f"Runner: failed to persist state for {sid}: {e}")
+            # P1-2: 不再静默吞掉 — 连续失败计数 + 阈值告警
+            fail_count = self._persist_fail_count.get(sid, 0) + 1
+            self._persist_fail_count[sid] = fail_count
+            if fail_count >= 3:
+                log.warning(
+                    f"Runner[{sid}] state persist FAILED {fail_count}x — "
+                    f"position may be lost on restart! Error: {e}"
+                )
+            else:
+                log.error(f"Runner[{sid}] state persist failed ({fail_count}x): {e}")
 
     # ------------------------------------------------------------------
     # M4: 行级锁（乐观锁模式）

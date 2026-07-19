@@ -96,16 +96,31 @@ async def refresh_kill_switch():
         log.debug(f"Kill switch refresh failed: {e}")
 
 
+async def flush_pending_orders():
+    """P1-2: 每 30 秒补偿 DB 写入失败的订单记录
+
+    下单成功但 DB 落库失败的订单会进入内存队列，
+    此任务定期重试，确保资金对账数据最终一致。
+    """
+    try:
+        from services.trading_service import flush_pending_order_records
+        await flush_pending_order_records()
+    except Exception as e:
+        log.debug(f"Pending orders flush failed: {e}")
+
+
 def start_scheduler():
     scheduler.add_job(sync_market_data, IntervalTrigger(hours=1), id="sync_market_data", replace_existing=True)
     scheduler.add_job(retrain_ml_models, IntervalTrigger(hours=24), id="retrain_ml_models", replace_existing=True)
     scheduler.add_job(ai_heartbeat, IntervalTrigger(hours=6), id="ai_heartbeat", replace_existing=True)
     # P0-1: kill_switch + risk_engine 多 worker 状态同步（每 5 秒刷新）
     scheduler.add_job(refresh_kill_switch, IntervalTrigger(seconds=5), id="refresh_kill_switch", replace_existing=True)
+    # P1-2: 订单落库失败补偿（每 30 秒重试内存队列）
+    scheduler.add_job(flush_pending_orders, IntervalTrigger(seconds=30), id="flush_pending_orders", replace_existing=True)
     # Phase 8: 任务执行监听（异常隔离 + 记录）
     scheduler.add_listener(_job_listener, EVENT_JOB_ERROR | EVENT_JOB_EXECUTED)
     scheduler.start()
-    log.info("Scheduler started (market data: 1h, ML retrain: 24h, AI heartbeat: 6h, kill_switch refresh: 5s)")
+    log.info("Scheduler started (market data: 1h, ML retrain: 24h, AI heartbeat: 6h, kill_switch refresh: 5s, pending orders flush: 30s)")
 
 
 def stop_scheduler():
