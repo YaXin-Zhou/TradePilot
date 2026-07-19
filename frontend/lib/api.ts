@@ -77,7 +77,7 @@ export const api = {
 
 
   // AI Strategy
-  aiAnalyze: (data: { api_key: string; strategy_desc: string; symbol?: string; timeframe?: string }) =>
+  aiAnalyze: (data: { api_key: string; strategy_desc: string; symbol?: string; timeframe?: string; auto?: boolean }) =>
     request("/api/ai/analyze", {
       method: "POST",
       body: JSON.stringify(data),
@@ -110,3 +110,4 @@ export const api = {
   testConnection: (data: { api_key?: string; secret?: string; passphrase?: string; testnet?: boolean }) =>
     request("/api/exchange/test-connection", { method: "POST", body: JSON.stringify(data) }),
 };
+

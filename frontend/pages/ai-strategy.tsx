@@ -67,6 +67,19 @@ export default function AIStrategyPage() {
     setPlacingOrder(false);
   };
 
+  const autoAnalyze = async () => {
+    if (!apiKey) return;
+    setLoading(true);
+    setResult(null);
+    try {
+      const res = await api.aiAnalyze({ api_key: apiKey, strategy_desc: "", auto: true });
+      setResult(res);
+    } catch (e: any) {
+      setResult({ error: e.message });
+    }
+    setLoading(false);
+  };
+
   const SignalBadge = ({ signal }: { signal: string }) => {
     if (signal === "buy" || signal === "strong_buy")
       return <span className="text-green text-lg font-bold flex items-center gap-1"><ArrowUpRight size={20} />{signal === "strong_buy" ? "STRONG BUY" : "BUY"}</span>;
@@ -77,7 +90,7 @@ export default function AIStrategyPage() {
 
   return (
     <div className="space-y-6">
-      <div><h2 className="text-lg font-semibold text-white">AI Strategy</h2><p className="text-xs text-dark-400 mt-1">Natural language trading strategy with DeepSeek AI</p></div>
+      <div><h2 className="text-lg font-semibold text-white">AI Strategy</h2><p className="text-xs text-dark-400 mt-1">AI generates strategies with automatic backtesting</p></div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="space-y-4">
@@ -99,7 +112,10 @@ export default function AIStrategyPage() {
             <button onClick={analyze} disabled={loading || !apiKey || !strategy.trim()}
               className="btn-primary flex items-center gap-2 text-sm mt-3 w-full justify-center">
               {loading ? <RefreshCw size={16} className="animate-spin" /> : <Send size={16} />}
-              {loading ? "Analyzing..." : "Analyze Market"}
+              {loading ? "Analyzing and Backtesting..." : "Analyze and Backtest"}
+            </button>
+            <button onClick={autoAnalyze} disabled={loading || !apiKey} className="btn-ghost w-full flex items-center justify-center gap-2 text-sm py-2.5 mt-2">
+              <Zap size={14} /> Auto Analyze
             </button>
           </div>
 
@@ -192,6 +208,27 @@ export default function AIStrategyPage() {
                       : "Order placed! ID: " + placedOrder.id + " Status: " + placedOrder.status}
                   </div>
                 )}
+                {result.strategy_description && (
+                  <div className="mt-3 pt-3 border-t border-dark-800">
+                    <span className="text-xs font-semibold text-white mb-2 block">AI Generated Strategy</span>
+                    <p className="text-xs text-dark-300">{result.strategy_description}</p>
+                    {result.market_assessment && <p className="text-xs text-dark-500 mt-1">Market: {result.market_assessment}</p>}
+                  </div>
+                )}
+                {result.backtest && (
+                  <div className="mt-3 pt-3 border-t border-dark-800">
+                    <span className="text-xs font-semibold text-white mb-2 block">Backtest Result</span>
+                    <div className="grid grid-cols-2 gap-1 text-xs">
+                      <div className="flex justify-between py-0.5"><span className="text-dark-400">Return</span><span className={"font-mono " + (result.backtest.total_return_pct >= 0 ? "text-okx-green" : "text-okx-red")}>{result.backtest.total_return_pct?.toFixed(2)}%</span></div>
+                      <div className="flex justify-between py-0.5"><span className="text-dark-400">Sharpe</span><span className="font-mono text-dark-200">{result.backtest.sharpe_ratio?.toFixed(2)}</span></div>
+                      <div className="flex justify-between py-0.5"><span className="text-dark-400">Max DD</span><span className="font-mono text-okx-red">{result.backtest.max_drawdown_pct?.toFixed(2)}%</span></div>
+                      <div className="flex justify-between py-0.5"><span className="text-dark-400">Win Rate</span><span className="font-mono text-okx-blue">{result.backtest.win_rate?.toFixed(0)}%</span></div>
+                      <div className="flex justify-between py-0.5"><span className="text-dark-400">Trades</span><span className="font-mono text-dark-200">{result.backtest.total_trades}</span></div>
+                      <div className="flex justify-between py-0.5"><span className="text-dark-400">Profit Factor</span><span className="font-mono text-okx-green">{result.backtest.profit_factor?.toFixed(2)}</span></div>
+                    </div>
+                    <div className="mt-2 text-xs text-dark-500">Strategy: {result.strategy_type} | Params: {JSON.stringify(result.strategy_params)}</div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -222,4 +259,5 @@ export default function AIStrategyPage() {
     </div>
   );
 }
+
 

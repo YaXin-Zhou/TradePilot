@@ -59,6 +59,9 @@ async def run_backtest(body: dict):
     timeframe = body.get("timeframe", "1h")
     limit = body.get("limit", 500)
     capital = float(body.get("capital", 10000))
+    position_size = float(body.get("position_size", 0.95))
+    trading_fee = float(body.get("trading_fee", 0.001))
+    slippage = float(body.get("slippage", 0.001))
     params = body.get("params", {})
 
     # Fetch OHLCV data
@@ -77,7 +80,7 @@ async def run_backtest(body: dict):
     if ohlcv is None or len(ohlcv) < 30:
         return {"success": False, "error": "Not enough data for backtest"}
 
-    engine = BacktestEngine(ohlcv, capital)
+    engine = BacktestEngine(ohlcv, capital, position_size_pct=position_size, trading_fee_pct=trading_fee, slippage_pct=slippage)
 
     try:
         if strategy_type == "ma_crossover":
@@ -107,6 +110,7 @@ async def run_backtest(body: dict):
                 "final_capital": result.final_capital,
                 "total_return": result.total_return,
                 "total_return_pct": result.total_return_pct,
+                "total_fees": result.total_fees,
                 "sharpe_ratio": result.sharpe_ratio,
                 "max_drawdown": result.max_drawdown,
                 "max_drawdown_pct": result.max_drawdown_pct,
@@ -142,6 +146,7 @@ async def run_backtest(body: dict):
             "result": {
                 "total_return": float(result.total_return),
                 "total_return_pct": float(result.total_return_pct),
+                "total_fees": float(result.total_fees),
                 "sharpe_ratio": float(result.sharpe_ratio),
                 "max_drawdown_pct": float(result.max_drawdown_pct),
                 "win_rate": float(result.win_rate),

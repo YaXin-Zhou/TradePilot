@@ -43,6 +43,9 @@ export default function BacktestPage() {
   const [symbol, setSymbol] = useState("BTC/USDT");
   const [timeframe, setTimeframe] = useState("1h");
   const [capital, setCapital] = useState(10000);
+  const [positionSize, setPositionSize] = useState(0.95);
+  const [tradingFee, setTradingFee] = useState(0.001);
+  const [slippage, setSlippage] = useState(0.001);
   const [strategy, setStrategy] = useState("ma_crossover");
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<any>(null);
@@ -55,7 +58,7 @@ export default function BacktestPage() {
       const res = await fetch("http://127.0.0.1:8000/api/backtest/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ strategy, symbol, timeframe, limit: 500, capital, params }),
+        body: JSON.stringify({ strategy, symbol, timeframe, limit: 500, capital, position_size: positionSize, trading_fee: tradingFee, slippage, params }),
       });
       const json = await res.json();
       if (json.success) setResult(json.data);
@@ -69,33 +72,33 @@ export default function BacktestPage() {
   const renderParams = () => {
     if (strategy === "ma_crossover") return (
       <div className="grid grid-cols-2 gap-3">
-        <div><label className="text-xs text-dark-400 block mb-1">Fast MA</label>
+        <div><label className="text-xs text-dark-400 block mb-1">{lang==="zh"?"快线":"Fast MA"}</label>
           <input type="number" value={params.fast} onChange={e => setParams(p=>({...p,fast:+e.target.value}))}
             className="w-full text-sm py-1.5 px-2 rounded border border-dark-800 bg-dark-900 text-dark-200" /></div>
-        <div><label className="text-xs text-dark-400 block mb-1">Slow MA</label>
+        <div><label className="text-xs text-dark-400 block mb-1">{lang==="zh"?"慢线":"Slow MA"}</label>
           <input type="number" value={params.slow} onChange={e => setParams(p=>({...p,slow:+e.target.value}))}
             className="w-full text-sm py-1.5 px-2 rounded border border-dark-800 bg-dark-900 text-dark-200" /></div>
       </div>
     );
     if (strategy === "rsi") return (
       <div className="grid grid-cols-3 gap-3">
-        <div><label className="text-xs text-dark-400 block mb-1">Period</label>
+        <div><label className="text-xs text-dark-400 block mb-1">{lang==="zh"?"周期":"Period"}</label>
           <input type="number" value={params.period} onChange={e => setParams(p=>({...p,period:+e.target.value}))}
             className="w-full text-sm py-1.5 px-2 rounded border border-dark-800 bg-dark-900 text-dark-200" /></div>
-        <div><label className="text-xs text-dark-400 block mb-1">Oversold</label>
+        <div><label className="text-xs text-dark-400 block mb-1">{lang==="zh"?"超卖":"Oversold"}</label>
           <input type="number" value={params.oversold} onChange={e => setParams(p=>({...p,oversold:+e.target.value}))}
             className="w-full text-sm py-1.5 px-2 rounded border border-dark-800 bg-dark-900 text-dark-200" /></div>
-        <div><label className="text-xs text-dark-400 block mb-1">Overbought</label>
+        <div><label className="text-xs text-dark-400 block mb-1">{lang==="zh"?"超买":"Overbought"}</label>
           <input type="number" value={params.overbought} onChange={e => setParams(p=>({...p,overbought:+e.target.value}))}
             className="w-full text-sm py-1.5 px-2 rounded border border-dark-800 bg-dark-900 text-dark-200" /></div>
       </div>
     );
     if (strategy === "bollinger") return (
       <div className="grid grid-cols-2 gap-3">
-        <div><label className="text-xs text-dark-400 block mb-1">Period</label>
+        <div><label className="text-xs text-dark-400 block mb-1">{lang==="zh"?"周期":"Period"}</label>
           <input type="number" value={params.period} onChange={e => setParams(p=>({...p,period:+e.target.value}))}
             className="w-full text-sm py-1.5 px-2 rounded border border-dark-800 bg-dark-900 text-dark-200" /></div>
-        <div><label className="text-xs text-dark-400 block mb-1">Std Dev</label>
+        <div><label className="text-xs text-dark-400 block mb-1">{lang==="zh"?"标准差":"Std Dev"}</label>
           <input type="number" value={params.std_dev} onChange={e => setParams(p=>({...p,std_dev:+e.target.value}))}
             step="0.1" className="w-full text-sm py-1.5 px-2 rounded border border-dark-800 bg-dark-900 text-dark-200" /></div>
       </div>
@@ -125,7 +128,7 @@ export default function BacktestPage() {
                 </select>
               </div>
               <div>
-                <label className="text-xs text-dark-400 block mb-1">Timeframe</label>
+                <label className="text-xs text-dark-400 block mb-1">{lang==="zh"?"时间周期":"Timeframe"}</label>
                 <select value={timeframe} onChange={e => setTimeframe(e.target.value)}
                   className="w-full text-sm py-1.5 px-2 rounded border border-dark-800 bg-dark-900 text-dark-200">
                   {TIMEFRAMES.map(t => <option key={t} value={t}>{t}</option>)}
@@ -134,6 +137,24 @@ export default function BacktestPage() {
               <div>
                 <label className="text-xs text-dark-400 block mb-1">{t("backtest.capital")}</label>
                 <input type="number" value={capital} onChange={e => setCapital(+e.target.value)}
+                  className="w-full text-sm py-1.5 px-2 rounded border border-dark-800 bg-dark-900 text-dark-200" />
+              </div>
+              <div>
+                <label className="text-xs text-dark-400 block mb-1">{lang==="zh"?"仓位比例":"Position Size"}</label>
+                <input type="number" value={positionSize} onChange={e => setPositionSize(+e.target.value)}
+                  min="0.01" max="1" step="0.05"
+                  className="w-full text-sm py-1.5 px-2 rounded border border-dark-800 bg-dark-900 text-dark-200" />
+              </div>
+              <div>
+                <label className="text-xs text-dark-400 block mb-1">{lang==="zh"?"交易费":"Trading Fee"}</label>
+                <input type="number" value={tradingFee} onChange={e => setTradingFee(+e.target.value)}
+                  min="0" max="0.1" step="0.0005"
+                  className="w-full text-sm py-1.5 px-2 rounded border border-dark-800 bg-dark-900 text-dark-200" />
+              </div>
+              <div>
+                <label className="text-xs text-dark-400 block mb-1">{lang==="zh"?"滑点":"Slippage"}</label>
+                <input type="number" value={slippage} onChange={e => setSlippage(+e.target.value)}
+                  min="0" max="0.05" step="0.0005"
                   className="w-full text-sm py-1.5 px-2 rounded border border-dark-800 bg-dark-900 text-dark-200" />
               </div>
               <div>
@@ -179,7 +200,7 @@ export default function BacktestPage() {
                   value={result.total_return.toFixed(2)} color={result.total_return >= 0 ? "#00c076" : "#f6465d"} />
                 <MetricCard icon={Percent} label={t("backtest.returnPct")}
                   value={result.total_return_pct.toFixed(2)} color={result.total_return_pct >= 0 ? "#00c076" : "#f6465d"} suffix="%" />
-                <MetricCard icon={Activity} label="Sharpe"
+                <MetricCard icon={Activity} label={lang==="zh"?"夏普":"Sharpe"}
                   value={result.sharpe_ratio.toFixed(2)} color={result.sharpe_ratio >= 1 ? "#00c076" : result.sharpe_ratio > 0 ? "#f0b90b" : "#f6465d"} />
                 <MetricCard icon={TrendingDown} label={t("backtest.maxDD")}
                   value={result.max_drawdown_pct.toFixed(2)} color="#f6465d" suffix="%" />
@@ -196,6 +217,10 @@ export default function BacktestPage() {
                 <div className="card">
                   <span className="text-dark-400">{t("backtest.profitFactor")}</span>
                   <p className="font-mono text-okx-green text-sm font-semibold mt-1">{result.profit_factor.toFixed(2)}</p>
+                </div>
+                <div className="card">
+                  <span className="text-dark-400">{lang==="zh"?"总费用":"Total Fees"}</span>
+                  <p className="font-mono text-okx-yellow text-sm font-semibold mt-1">${result.total_fees?.toFixed(2) || "0.00"}</p>
                 </div>
                 <div className="card">
                   <span className="text-dark-400">{t("strat.type")}</span>
@@ -276,3 +301,4 @@ export default function BacktestPage() {
     </div>
   );
 }
+

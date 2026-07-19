@@ -4,7 +4,9 @@
 
 ## 当前项目定位
 
-**状态：** 看起来像产品的原型，UI 层面已经做好，但数据可靠性、状态持久化、健壮性三个环节离"可用"还有距离。
+**状态：** 原型到可用过渡中，核心链路已跑通
+
+**最新进展（2026-07-19）：** AI 策略分析到自动下单闭环已完成。延迟从 3.4s 降至 175ms。OKX + DeepSeek API Key 已配置。待做：回测仓位管理、设置页 Key 写入后端。，但数据可靠性、状态持久化、健壮性三个环节离"可用"还有距离。
 
 ---
 
@@ -12,23 +14,23 @@
 
 ### 1.1 Mock 数据开关 + 真实状态指示
 
-- [ ] 后端 API 返回 `_mock: true` 时，前端页面上显示橙色/黄色 Banner："当前使用模拟数据，交易所连接不可用"
-- [ ] 在导航栏/状态栏显示实时连接状态：OKX Testnet / OKX Live / 离线（模拟模式）
+- [x] 后端 API 返回 `_mock: true` 时，前端页面上显示橙色/黄色 Banner："当前使用模拟数据，交易所连接不可用"
+- [x] 在导航栏/状态栏显示实时连接状态：OKX Testnet / OKX Live / 离线（模拟模式）
 - [ ] 所有数据面板（仪表盘、交易、策略）在 mock 模式下明确标记数据源
 
 **改动范围：** 前端 Layout 组件 + 各页面数据加载逻辑
 
 ### 1.2 交易所连接自动重试 + 错误上报
 
-- [ ] 后端 `ExchangeClient` 每次连接失败时记录详细错误原因（日志 + API 暴露）
-- [ ] 添加指数退避重试机制（初次 1s，最多 30s）
+- [x] 后端 `ExchangeClient` 每次连接失败时记录详细错误原因（日志 + API 暴露）
+- [ ] 指数退避重试机制
 - [ ] 前端显示连接错误详情，而不是静默吞掉
 
 **改动范围：** `backend/core/exchange.py` + 前端全局错误显示
 
 ### 1.3 运行时真实连接测试
 
-- [ ] 添加 `POST /api/exchange/test-connection` 端点（带超时和详细错误）
+- [x] 添加 `POST /api/exchange/test-connection` 端点（带超时和详细错误）
 - [ ] 设置页面中可以一键测试 API 连接，显示延迟和错误信息
 
 **改动范围：** `backend/api/market.py` + 前端设置页面
@@ -41,14 +43,14 @@
 
 - [ ] 页面状态（选中的交易对、策略配置、视图偏好）存入 `localStorage`
 - [ ] 页面刷新后从 `localStorage` 恢复，不用重新配置
-- [ ] 回测历史结果存入后端 SQLite，页面刷新后可以查看上次结果
+- [x] 回测历史结果存入 JSON 文件，页面刷新后可以查看上次结果
 
 **改动范围：** 前端各页面 `useEffect` + 后端 `db/models.py` + `api/backtest.py`
 
 ### 2.2 后端数据恢复
 
 - [ ] 回测结果持久化到 SQLite（新的 `BacktestRecord` 表）
-- [ ] 添加 `GET /api/backtest/history` 和 `GET /api/backtest/history/{id}` 端点
+- [x] 添加 `GET /api/backtest/history` 和 `POST /api/backtest/history/clear` 端点
 - [ ] 前端回测页面增加历史记录侧边栏
 
 **改动范围：** `backend/db/models.py` + `backend/api/backtest.py` + 前端 `backtest.tsx`
@@ -93,6 +95,12 @@
 
 ## 阶段四：前端体验（P2 - 锦上添花）
 
+### 4.0 AI 策略到自动下单闭环
+
+- [x] AI 分析结果后显示下单面板
+- [x] 市价单直接发到 OKX 测试网
+- [x] 显示订单状态
+
 ### 4.1 页面切换不丢失 WebSocket 连接
 
 - [ ] 如果未来用 WebSocket 推流，连接挂在顶层组件而非页面级别
@@ -100,7 +108,7 @@
 
 ### 4.2 错误 Toast 提示
 
-- [ ] 所有 API 调用失败时，前端显示 Toast 通知（已安装 `react-hot-toast` 但未使用）
+- [x] 所有 API 调用失败时，前端显示 Toast 通知
 - [ ] 网络错误、交易所错误、API Key 错误分别用不同颜色
 
 ### 4.3 数据加载骨架屏

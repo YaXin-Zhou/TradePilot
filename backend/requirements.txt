@@ -16,3 +16,10 @@ websockets>=13.0
 pydantic>=2.9.0
 pydantic-settings>=2.6.0
 
+
+# Production dependencies
+asyncpg>=0.30.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+apscheduler>=3.10.0
+ccxt[pro]>=4.4.0

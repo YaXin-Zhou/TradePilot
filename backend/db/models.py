@@ -51,7 +51,9 @@ class StrategyStatus(str, enum.Enum):
 class User(Base):
     __tablename__ = "users"
     id = Column(String, primary_key=True, default=_uuid)
-    name = Column(String(64), default="Trader")
+    name = Column(String(64), unique=True, nullable=False)
+    email = Column(String(128), unique=True, nullable=True)
+    hashed_password = Column(String(256), nullable=False)
     created_at = Column(DateTime, default=_utcnow)
     strategies = relationship("Strategy", back_populates="user")
     orders = relationship("Order", back_populates="user")

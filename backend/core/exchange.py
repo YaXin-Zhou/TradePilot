@@ -264,3 +264,4 @@ shared_exchange = ExchangeClient(
     passphrase=settings.EXCHANGE_PASSPHRASE,
     testnet=settings.EXCHANGE_TESTNET,
 )
+

@@ -49,9 +49,9 @@ export default function StrategiesPage() {
             <div><label className="text-xs text-dark-400 block mb-1">{t("strat.name")}</label><input value={name} onChange={(e) => setName(e.target.value)} className="w-full" /></div>
             <div><label className="text-xs text-dark-400 block mb-1">{t("strat.type")}</label>
               <select value={type} onChange={(e) => setType(e.target.value)} className="w-full">
-                <option value="grid">Grid Trading</option>
-                <option value="ml_signal">ML Signal</option>
-                <option value="sma_cross">SMA Cross</option>
+                <option value="grid">{t("strat.gridTrading")}</option>
+                <option value="ml_signal">{t("strat.mlSignal")}</option>
+                <option value="sma_cross">{t("strat.smaCross")}</option>
               </select>
             </div>
             <div><label className="text-xs text-dark-400 block mb-1">{t("strat.lower")}</label><input type="number" value={lower} onChange={(e) => setLower(e.target.value)} className="w-full" /></div>
@@ -105,3 +105,4 @@ export default function StrategiesPage() {
     </div>
   );
 }
+

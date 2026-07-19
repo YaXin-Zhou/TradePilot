@@ -16,6 +16,7 @@ class BacktestTrade:
     size: float = 0.0
     pnl: float = 0.0
     pnl_pct: float = 0.0
+    fee: float = 0.0
     status: str = "open"
 
 
@@ -40,18 +41,26 @@ class BacktestResult:
     avg_win: float = 0.0
     avg_loss: float = 0.0
     profit_factor: float = 0.0
+    total_fees: float = 0.0
     trades: list = field(default_factory=list)
     equity_curve: list = field(default_factory=list)
 
 
 class BacktestEngine:
-    def __init__(self, data: pd.DataFrame, initial_capital: float = 10000.0):
+    def __init__(self, data: pd.DataFrame, initial_capital: float = 10000.0,
+                 position_size_pct: float = 0.95,
+                 trading_fee_pct: float = 0.001,
+                 slippage_pct: float = 0.001):
         self.data = data.copy().reset_index(drop=True)
         self.initial_capital = initial_capital
         self.capital = initial_capital
         self.position = 0.0
+        self.position_size_pct = position_size_pct
+        self.trading_fee_pct = trading_fee_pct
+        self.slippage_pct = slippage_pct
         self.trades: list[BacktestTrade] = []
         self.equity_curve: list[dict] = []
+        self.total_fees: float = 0.0
         self._current_trade: Optional[BacktestTrade] = None
 
     def _record_equity(self, timestamp, price):
@@ -61,23 +70,32 @@ class BacktestEngine:
             "timestamp": ts_str, "equity": round(eq_val, 2), "price": round(price, 2),
         })
 
-    def _open_long(self, timestamp, price, size_pct=0.95):
-        cost = self.capital * size_pct
-        size = cost / price
+    def _open_long(self, timestamp, price):
+        entry_price = price * (1 + self.slippage_pct)  # slippage: buy higher
+        cost = self.capital * self.position_size_pct
+        fee = cost * self.trading_fee_pct
+        size = (cost - fee) / entry_price
         self.position += size
         self.capital -= cost
-        trade = BacktestTrade(entry_time=timestamp, entry_price=price, side="buy", size=size)
+        self.total_fees += fee
+        trade = BacktestTrade(entry_time=timestamp, entry_price=entry_price, side="buy", size=size, fee=fee)
         self._current_trade = trade
         self.trades.append(trade)
 
     def _close_long(self, timestamp, price):
         if self._current_trade and self.position > 0:
+            exit_price = price * (1 - self.slippage_pct)  # slippage: sell lower
+            gross_proceeds = self.position * exit_price
+            fee = gross_proceeds * self.trading_fee_pct
+            net_proceeds = gross_proceeds - fee
             self._current_trade.exit_time = timestamp
-            self._current_trade.exit_price = price
-            self._current_trade.pnl = self.position * (price - self._current_trade.entry_price)
-            self._current_trade.pnl_pct = ((price - self._current_trade.entry_price) / self._current_trade.entry_price) * 100
+            self._current_trade.exit_price = exit_price
+            self._current_trade.fee = (self._current_trade.fee or 0) + fee
+            self._current_trade.pnl = net_proceeds - (self.position * self._current_trade.entry_price)
+            self._current_trade.pnl_pct = ((exit_price - self._current_trade.entry_price) / self._current_trade.entry_price) * 100
             self._current_trade.status = "closed"
-            self.capital += self.position * price
+            self.capital += net_proceeds
+            self.total_fees += fee
             self.position = 0.0
             self._current_trade = None
 
@@ -202,6 +220,7 @@ class BacktestEngine:
             avg_win=round(avg_win, 2),
             avg_loss=round(avg_loss, 2),
             profit_factor=pf,
+            total_fees=round(self.total_fees, 2),
             trades=[t.__dict__ for t in closed],
             equity_curve=self.equity_curve,
         )

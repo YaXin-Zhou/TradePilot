@@ -10,7 +10,7 @@ from config import settings
 db_path = Path(settings.DATABASE_URL.replace("sqlite+aiosqlite:///", "")).parent
 db_path.mkdir(parents=True, exist_ok=True)
 
-engine = create_async_engine(settings.DATABASE_URL, echo=settings.ECHO_SQL)
+engine = create_async_engine(settings.DATABASE_URL, echo=settings.ECHO_SQL, pool_size=10, max_overflow=20)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
