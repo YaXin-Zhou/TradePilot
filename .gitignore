@@ -19,13 +19,9 @@ node_modules/
 *.db-journal
 
 # Runtime state files (运行时状态，不应入库)
-backend/data/kill_switch.json
-backend/data/runner_state.json
-backend/data/strategy_pool.json
-backend/data/validation_pipelines.json
-backend/data/online_learner.json
-backend/data/risk_policies.json
+backend/data/*.json
 backend/data/heartbeats/
+!backend/data/.gitkeep
 
 # Logs
 *.log
