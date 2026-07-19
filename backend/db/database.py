@@ -42,6 +42,9 @@ async def init_db():
         # M1: 迁移已有 orders 表 — 添加 account_id / idempotency_key / raw 字段
         await conn.run_sync(_migrate_orders_table)
 
+    # P0-2: PostgreSQL 枚举补值（必须在事务外运行，ALTER TYPE ADD VALUE 在 PG<12 不支持事务）
+    await _migrate_strategytype_enum()
+
 
 def _migrate_orders_table(conn):
     """为已有 orders 表添加 M1/M3 新字段（create_all 不会 ALTER 已有表）"""
@@ -59,6 +62,56 @@ def _migrate_orders_table(conn):
         if col_name not in existing_cols:
             conn.execute(text(f"ALTER TABLE orders ADD COLUMN {col_name} {col_type}"))
             print(f"[M1] Migrated: orders.{col_name} added")
+
+
+async def _migrate_strategytype_enum():
+    """P0-2: 为 PostgreSQL strategytype 枚举补值（MA_CROSS/RSI/BOLLINGER/AI_GENERATED）
+
+    旧版 DB 的 strategytype 枚举只有 GRID/ML_SIGNAL/SMA_CROSS/CUSTOM，
+    但 Python 枚举已有 8 个值。create_all 不会 ALTER 已有 enum type，
+    需要手动 ALTER TYPE ADD VALUE。
+
+    SQLite 没有原生 enum（用 VARCHAR 存储），跳过。
+    ALTER TYPE ADD VALUE 在 PG<12 不能在事务中运行，使用 AUTOCOMMIT。
+    """
+    if "sqlite" in settings.DATABASE_URL:
+        return  # SQLite 无原生 enum
+
+    from sqlalchemy import text
+
+    missing_values = ["MA_CROSS", "RSI", "BOLLINGER", "AI_GENERATED"]
+
+    # AUTOCOMMIT 模式：ALTER TYPE ADD VALUE 不能在事务中运行（PG<12）
+    async with engine.connect() as conn:
+        await conn.execution_options(isolation_level="AUTOCOMMIT")
+
+        # 1) 检查枚举类型是否存在 + 当前有哪些值
+        try:
+            result = await conn.execute(
+                text(
+                    "SELECT enumlabel FROM pg_enum WHERE enumtypid = "
+                    "(SELECT oid FROM pg_type WHERE typname = 'strategytype')"
+                )
+            )
+            existing = {row[0] for row in result}
+        except Exception:
+            return  # 类型不存在（首次启动 create_all 会创建完整枚举）
+
+        if not existing:
+            return
+
+        # 2) 补缺失值（IF NOT EXISTS 保证幂等）
+        for val in missing_values:
+            if val not in existing:
+                try:
+                    await conn.execute(
+                        text(f"ALTER TYPE strategytype ADD VALUE IF NOT EXISTS '{val}'")
+                    )
+                    print(f"[P0-2] strategytype enum + {val}")
+                    existing.add(val)
+                except Exception as e:
+                    # 非致命：仅警告，不阻断启动
+                    print(f"[P0-2] WARN: strategytype + {val} failed: {e}")
 
 
 async def get_session() -> AsyncSession:
