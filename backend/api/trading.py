@@ -1,6 +1,7 @@
 """交易 API - 带模拟数据后备"""
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from core.exchange import shared_exchange as _exchange
+from auth.deps import get_current_user
 from config import settings
 from pydantic import BaseModel
 import random, uuid
@@ -29,7 +30,7 @@ class MarketOrderRequest(BaseModel):
 
 
 @router.get("/balance")
-async def get_balance():
+async def get_balance(_user: dict = Depends(get_current_user)):
     try:
         bal = _exchange.fetch_balance()
         return {"success": True, "data": bal}
@@ -42,7 +43,7 @@ async def get_balance():
 
 
 @router.post("/limit-order")
-async def place_limit_order(req: LimitOrderRequest):
+async def place_limit_order(req: LimitOrderRequest, _user: dict = Depends(get_current_user)):
     try:
         order = _exchange.create_limit_order(req.symbol, req.side, req.amount, req.price)
         return {"success": True, "data": order}
@@ -59,12 +60,12 @@ async def place_limit_order(req: LimitOrderRequest):
 
 
 @router.post("/cancel-order")
-async def cancel_order(req: CancelOrderRequest):
+async def cancel_order(req: CancelOrderRequest, _user: dict = Depends(get_current_user)):
     return {"success": True}
 
 
 @router.post("/market-order")
-async def place_market_order(req: MarketOrderRequest):
+async def place_market_order(req: MarketOrderRequest, _user: dict = Depends(get_current_user)):
     try:
         order = _exchange.create_market_order(req.symbol, req.side, req.amount)
         return {"success": True, "data": order}
@@ -81,7 +82,7 @@ async def place_market_order(req: MarketOrderRequest):
 
 
 @router.get("/open-orders")
-async def get_open_orders(symbol: str = settings.DEFAULT_SYMBOL):
+async def get_open_orders(symbol: str = settings.DEFAULT_SYMBOL, _user: dict = Depends(get_current_user)):
     try:
         orders = _exchange.fetch_open_orders(symbol)
         return {"success": True, "data": orders}
@@ -90,7 +91,7 @@ async def get_open_orders(symbol: str = settings.DEFAULT_SYMBOL):
 
 
 @router.get("/trades")
-async def get_trades(symbol: str = settings.DEFAULT_SYMBOL, limit: int = 50):
+async def get_trades(symbol: str = settings.DEFAULT_SYMBOL, limit: int = 50, _user: dict = Depends(get_current_user)):
     try:
         trades = _exchange.fetch_my_trades(symbol, limit)
         return {"success": True, "data": trades}

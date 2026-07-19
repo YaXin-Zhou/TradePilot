@@ -11,10 +11,15 @@ async function getToast() {
 
 async function request(path: string, options?: RequestInit) {
   const url = `${API_BASE}${path}`;
-  const res = await fetch(url, {
-    headers: { "Content-Type": "application/json", ...options?.headers },
-    ...options,
-  });
+  const headers: any = { "Content-Type": "application/json", ...options?.headers };
+  const token = getToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(url, { headers, ...options });
+  if (res.status === 401) {
+    clearToken();
+    if (typeof window !== "undefined") window.location.href = "/login";
+    throw new Error("Unauthorized");
+  }
   const json = await res.json();
   if (!json.success) {
     const msg = json.error || "Request failed";
@@ -23,6 +28,18 @@ async function request(path: string, options?: RequestInit) {
     throw new Error(msg);
   }
   return json.data;
+}
+
+// Auth token helpers
+export function getToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("auth_token");
+}
+export function setToken(token: string) {
+  localStorage.setItem("auth_token", token);
+}
+export function clearToken() {
+  localStorage.removeItem("auth_token");
 }
 
 export const api = {
@@ -109,5 +126,10 @@ export const api = {
   getExchangeStatus: () => request("/api/exchange/status"),
   testConnection: (data: { api_key?: string; secret?: string; passphrase?: string; testnet?: boolean }) =>
     request("/api/exchange/test-connection", { method: "POST", body: JSON.stringify(data) }),
+  // Auth
+  login: (username: string, password: string) =>
+    request("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
+  register: (username: string, password: string, email?: string) =>
+    request("/api/auth/register", { method: "POST", body: JSON.stringify({ username, password, email }) }),
 };
 
