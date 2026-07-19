@@ -30,6 +30,7 @@ class LimitOrderRequest(BaseModel):
     amount: float
     price: float
     confirm_live: bool = False  # 实盘模式二次确认
+    account_id: str = "default"  # M3: 多账户支持
 
 
 class CancelOrderRequest(BaseModel):
@@ -42,6 +43,7 @@ class MarketOrderRequest(BaseModel):
     side: str
     amount: float
     confirm_live: bool = False  # 实盘模式二次确认
+    account_id: str = "default"  # M3: 多账户支持
 
 
 class EmergencyStopRequest(BaseModel):
@@ -67,6 +69,7 @@ async def api_limit_order(req: LimitOrderRequest, _user: dict = Depends(get_curr
     order, error, is_mock = await place_limit_order(
         _user.get("id", "system"), req.symbol, req.side, req.amount, req.price,
         confirm_live=req.confirm_live,
+        account_id=req.account_id,  # M3: 多账户
     )
     if error:
         return {"success": False, "error": error}
@@ -97,6 +100,7 @@ async def api_market_order(req: MarketOrderRequest, _user: dict = Depends(get_cu
     order, error, is_mock = await place_market_order(
         _user.get("id", "system"), req.symbol, req.side, req.amount,
         confirm_live=req.confirm_live,
+        account_id=req.account_id,  # M3: 多账户
     )
     if error:
         return {"success": False, "error": error}

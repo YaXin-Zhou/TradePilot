@@ -10,14 +10,116 @@
   7. 实盘模式 AI 功能禁用
 """
 import asyncio
+import time
 from core.exchange import shared_exchange, ExchangeError
 from core.tick_cache import tick_cache  # M2: TTL 缓存
+from core.exchange_registry import exchange_registry  # M2: 多租户实例池
 from core.logger import log
 from core.kill_switch import kill_switch
 from config import settings
 from services.risk_engine import risk_engine
 from services.regime_detector import regime_detector, MarketRegime
-from db.models import StrategyType
+from db.database import async_session
+from db.models import Order, AuditLog, OrderType, OrderStatus, StrategyType
+
+
+# ------------------------------------------------------------------
+# M3: 下单落库 + 审计写入
+# ------------------------------------------------------------------
+
+async def _record_order_success(
+    user_id: str,
+    account_id: str,
+    symbol: str,
+    side: str,
+    amount: float,
+    order_result: dict,
+    order_type: OrderType,
+    idempotency_key: str,
+):
+    """下单成功后原子写 orders + audit_logs（同一事务）"""
+    try:
+        async with async_session() as session:
+            status_str = order_result.get("status") or "open"
+            try:
+                status = OrderStatus(status_str)
+            except (ValueError, TypeError):
+                status = OrderStatus.OPEN if "open" in str(status_str) else OrderStatus.CLOSED
+
+            order_record = Order(
+                user_id=user_id if user_id else "default",
+                account_id=account_id,
+                symbol=symbol,
+                side=side,
+                type=order_type,
+                status=status,
+                price=float(order_result.get("price", 0)),
+                amount=float(amount),
+                filled=float(order_result.get("filled", 0)),
+                cost=float(order_result.get("cost", 0)),
+                exchange_order_id=str(order_result.get("id", "")),
+                idempotency_key=idempotency_key,
+                raw=order_result,
+            )
+            audit = AuditLog(
+                actor=user_id or "system",
+                action="place_order",
+                entity_type="order",
+                entity_id=str(order_result.get("id", "")),
+                detail={
+                    "idempotency_key": idempotency_key,
+                    "symbol": symbol,
+                    "side": side,
+                    "amount": amount,
+                    "account_id": account_id,
+                    "order_type": order_type.value,
+                },
+                result="ok",
+            )
+            session.add_all([order_record, audit])
+            await session.commit()
+            log.info(f"Order recorded: {order_result.get('id')} (account={account_id})")
+    except Exception as e:
+        log.error(f"Failed to record order (non-fatal): {e}")
+
+
+async def _record_order_failure(
+    user_id: str,
+    account_id: str,
+    symbol: str,
+    side: str,
+    amount: float,
+    order_type: OrderType,
+    idempotency_key: str,
+    error: str,
+):
+    """下单失败时写 audit_logs（result=error）"""
+    try:
+        async with async_session() as session:
+            audit = AuditLog(
+                actor=user_id or "system",
+                action="place_order",
+                entity_type="order",
+                detail={
+                    "idempotency_key": idempotency_key,
+                    "symbol": symbol,
+                    "side": side,
+                    "amount": amount,
+                    "account_id": account_id,
+                    "order_type": order_type.value,
+                },
+                result="error",
+                error_msg=error,
+            )
+            session.add(audit)
+            await session.commit()
+    except Exception as e:
+        log.error(f"Failed to record audit (non-fatal): {e}")
+
+
+def _make_idempotency_key(account_id: str, symbol: str, side: str, amount: float) -> str:
+    """生成幂等键（防止网络抖动重复下单）"""
+    return f"{account_id}:{symbol}:{side}:{amount}:{int(time.time() * 1000) // 1000}"
 
 
 # ------------------------------------------------------------------
@@ -150,13 +252,17 @@ async def get_balance() -> tuple[dict, bool]:
 
 async def place_limit_order(user_id: str, symbol: str, side: str,
                             amount: float, price: float,
-                            confirm_live: bool = False) -> tuple[dict | None, str | None, bool]:
+                            confirm_live: bool = False,
+                            account_id: str = "default") -> tuple[dict | None, str | None, bool]:
     """下限量单。返回 (order, error_msg, is_mock)
 
     Phase 8 改动：
     - 下单失败抛错（不再返回 mock 假单）
     - 实盘模式需 confirm_live=True
     - 下单后 fetch_order 对账
+    M3 改动：
+    - 下单后原子写 orders + audit_logs（本地落库）
+    - 支持 account_id 多账户
     """
     # 实盘二次确认
     if not settings.EXCHANGE_TESTNET and not confirm_live:
@@ -166,6 +272,8 @@ async def place_limit_order(user_id: str, symbol: str, side: str,
     ok, msg = await _enhanced_risk_check(user_id, symbol, side, amount_usdt)
     if not ok:
         return None, msg, False
+
+    idempotency_key = _make_idempotency_key(account_id, symbol, side, amount)
 
     try:
         order = await asyncio.to_thread(
@@ -185,24 +293,35 @@ async def place_limit_order(user_id: str, symbol: str, side: str,
                 log.warning(f"Order verification failed (non-fatal): {e}")
                 order["verified"] = False
 
+        # M3: 本地落库（orders + audit_logs 原子写）
+        await _record_order_success(
+            user_id, account_id, symbol, side, amount, order, OrderType.LIMIT, idempotency_key
+        )
+
         return order, None, False
     except ExchangeError as e:
         log.error(f"Limit order FAILED: {e}")
+        await _record_order_failure(user_id, account_id, symbol, side, amount, OrderType.LIMIT, idempotency_key, str(e))
         return None, f"限价单下单失败: {e}", False
     except Exception as e:
         log.error(f"Limit order exception: {e}")
+        await _record_order_failure(user_id, account_id, symbol, side, amount, OrderType.LIMIT, idempotency_key, str(e))
         return None, f"限价单异常: {e}", False
 
 
 async def place_market_order(user_id: str, symbol: str, side: str,
                              amount: float,
-                             confirm_live: bool = False) -> tuple[dict | None, str | None, bool]:
+                             confirm_live: bool = False,
+                             account_id: str = "default") -> tuple[dict | None, str | None, bool]:
     """下市价单。返回 (order, error_msg, is_mock)
 
     Phase 8 改动：
     - 下单失败抛错（不再返回 mock 假单）
     - 实盘模式需 confirm_live=True
     - 下单后 fetch_order 对账
+    M3 改动：
+    - 下单后原子写 orders + audit_logs（本地落库）
+    - 支持 account_id 多账户
     """
     # 实盘二次确认
     if not settings.EXCHANGE_TESTNET and not confirm_live:
@@ -216,6 +335,8 @@ async def place_market_order(user_id: str, symbol: str, side: str,
     ok, msg = await _enhanced_risk_check(user_id, symbol, side, amount_usdt)
     if not ok:
         return None, msg, False
+
+    idempotency_key = _make_idempotency_key(account_id, symbol, side, amount)
 
     try:
         order = await asyncio.to_thread(
@@ -235,12 +356,19 @@ async def place_market_order(user_id: str, symbol: str, side: str,
                 log.warning(f"Order verification failed (non-fatal): {e}")
                 order["verified"] = False
 
+        # M3: 本地落库（orders + audit_logs 原子写）
+        await _record_order_success(
+            user_id, account_id, symbol, side, amount, order, OrderType.MARKET, idempotency_key
+        )
+
         return order, None, False
     except ExchangeError as e:
         log.error(f"Market order FAILED: {e}")
+        await _record_order_failure(user_id, account_id, symbol, side, amount, OrderType.MARKET, idempotency_key, str(e))
         return None, f"市价单下单失败: {e}", False
     except Exception as e:
         log.error(f"Market order exception: {e}")
+        await _record_order_failure(user_id, account_id, symbol, side, amount, OrderType.MARKET, idempotency_key, str(e))
         return None, f"市价单异常: {e}", False
 
 
