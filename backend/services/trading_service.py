@@ -11,6 +11,7 @@
 """
 import asyncio
 from core.exchange import shared_exchange, ExchangeError
+from core.tick_cache import tick_cache  # M2: TTL 缓存
 from core.logger import log
 from core.kill_switch import kill_switch
 from config import settings
@@ -23,9 +24,10 @@ from db.models import StrategyType
 # 辅助
 # ------------------------------------------------------------------
 
-def _get_price(symbol: str) -> float:
+async def _get_price(symbol: str) -> float:
+    """获取最新价格（M2: 改用 tick_cache，async 不阻塞事件循环）"""
     try:
-        t = shared_exchange.fetch_ticker(symbol)
+        t = await tick_cache.get(shared_exchange, symbol)
         return t.get("last", 0) or 0
     except Exception:
         return 0
@@ -206,7 +208,7 @@ async def place_market_order(user_id: str, symbol: str, side: str,
     if not settings.EXCHANGE_TESTNET and not confirm_live:
         return None, "实盘模式下单需二次确认（confirm_live=true）", False
 
-    est_price = _get_price(symbol)
+    est_price = await _get_price(symbol)
     if est_price <= 0:
         return None, "无法获取当前价格，拒绝下单", False
 
