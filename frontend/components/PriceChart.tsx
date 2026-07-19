@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { api } from "../lib/api";
+import { useOHLCV } from "../lib/swr-config";
 
 interface OHLCVData {
   timestamp: string;
@@ -22,25 +22,18 @@ interface LiveTicker {
 
 export default function PriceChart({
   ticker,
-  refreshKey,
 }: {
   ticker?: LiveTicker;
-  refreshKey: number;
 }) {
   const [data, setData] = useState<OHLCVData[]>([]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [livePoints, setLivePoints] = useState<number[]>([]);
 
+  // SWR 自动轮询 OHLCV（替代双重 useEffect + setInterval）
+  const { data: ohlcvData } = useOHLCV();
   useEffect(() => {
-    api.getOHLCV().then(setData).catch(() => {});
-  }, [refreshKey]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      api.getOHLCV().then(setData).catch(() => {});
-    }, 30000);
-    return () => clearInterval(interval);
-  }, []);
+    if (ohlcvData) setData(ohlcvData);
+  }, [ohlcvData]);
 
   useEffect(() => {
     if (!ticker) return;

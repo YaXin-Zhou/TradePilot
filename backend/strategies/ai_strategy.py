@@ -105,7 +105,9 @@ Analyze ALL indicators. Consider trend, momentum, volatility, volume."""
         try:
             c = raw["choices"][0]["message"]["content"]
             m = re.search(r"\{.*\}", c, re.DOTALL)
-            data = json.loads(m.group()) if m else {}
+            if not m:
+                return Signal(type=SignalType.HOLD, price=0, reason="Parse failed"), strategy_info
+            data = json.loads(m.group())
             smap = {"buy": SignalType.BUY, "sell": SignalType.SELL, "hold": SignalType.HOLD, "strong_buy": SignalType.STRONG_BUY, "strong_sell": SignalType.STRONG_SELL}
             signal = Signal(
                 type=smap.get(data.get("signal", "hold").lower(), SignalType.HOLD),

@@ -4,6 +4,7 @@ import { useLanguage } from "../lib/LanguageContext";
 import {
   Play, BarChart3, TrendingUp, TrendingDown, RefreshCw,
   Activity, Target, DollarSign, Percent, Hash,
+  ShieldCheck, ShieldAlert, AlertTriangle, Divide,
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -55,14 +56,11 @@ export default function BacktestPage() {
     setRunning(true);
     setResult(null);
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/backtest/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ strategy, symbol, timeframe, limit: 500, capital, position_size: positionSize, trading_fee: tradingFee, slippage, params }),
+      const data = await api.runBacktest({
+        strategy, symbol, timeframe, limit: 500, capital,
+        position_size: positionSize, trading_fee: tradingFee, slippage, params,
       });
-      const json = await res.json();
-      if (json.success) setResult(json.data);
-      else console.error("Backtest failed:", json.error);
+      setResult(data);
     } catch (e) {
       console.error("Backtest error:", e);
     }
@@ -209,6 +207,145 @@ export default function BacktestPage() {
                 <MetricCard icon={BarChart3} label={t("backtest.totalTrades")}
                   value={result.total_trades} color="#a855f7" />
               </div>
+
+              {/* ===== Validation Results ===== */}
+              {result.validation && !result.validation.error && (
+                <div className="space-y-3">
+                  {/* Scientific gate banner */}
+                  <div className={`card border-l-4 ${result.validation.scientific_passed ? "border-l-okx-green" : "border-l-okx-red"}`}>
+                    <div className="flex items-center gap-3">
+                      {result.validation.scientific_passed
+                        ? <ShieldCheck size={22} className="text-okx-green" />
+                        : <ShieldAlert size={22} className="text-okx-red" />
+                      }
+                      <div>
+                        <p className={`text-sm font-semibold ${result.validation.scientific_passed ? "text-okx-green" : "text-okx-red"}`}>
+                          {result.validation.scientific_passed ? t("backtest.scientificPassed") : t("backtest.scientificFailed")}
+                        </p>
+                        <p className="text-xs text-dark-400 mt-0.5">
+                          {lang==="zh" ? "五重统计学检验" : "5 statistical tests"} — DSR: {result.validation.dsr?.toFixed(2) || "N/A"} · PBO: {((result.validation.pbo ?? 0) * 100).toFixed(1)}%
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* IS/OOS split comparison */}
+                  <div className="card">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Divide size={14} className="text-okx-yellow" />
+                      <span className="text-xs font-semibold text-dark-200">{t("backtest.isOosSplit")}</span>
+                      <span className="text-[10px] text-dark-500 ml-auto">{result.validation.is_bars}/{result.validation.oos_bars} bars</span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-3">
+                      <div className="text-center">
+                        <p className="text-xs text-dark-400">{t("backtest.sharpeIS")}</p>
+                        <p className={`text-base font-mono font-bold mt-0.5 ${result.validation.sharpe_is >= 1 ? "text-okx-green" : result.validation.sharpe_is > 0 ? "text-okx-yellow" : "text-okx-red"}`}>
+                          {result.validation.sharpe_is.toFixed(2)}
+                        </p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs text-dark-400">{t("backtest.sharpeOOS")}</p>
+                        <p className={`text-base font-mono font-bold mt-0.5 ${result.validation.sharpe_oos >= 1 ? "text-okx-green" : result.validation.sharpe_oos > 0 ? "text-okx-yellow" : "text-okx-red"}`}>
+                          {result.validation.sharpe_oos.toFixed(2)}
+                        </p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs text-dark-400">{t("backtest.maxDdIS")}</p>
+                        <p className="text-base font-mono font-bold mt-0.5 text-okx-red">
+                          {result.validation.max_dd_is.toFixed(1)}%
+                        </p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs text-dark-400">{t("backtest.maxDdOOS")}</p>
+                        <p className="text-base font-mono font-bold mt-0.5 text-okx-red">
+                          {result.validation.max_dd_oos.toFixed(1)}%
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Overfitting + Significance tests */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="card">
+                      <div className="flex items-center gap-2 mb-3">
+                        <AlertTriangle size={14} className={result.validation.pbo > 0.5 ? "text-okx-red" : "text-okx-yellow"} />
+                        <span className="text-xs font-semibold text-dark-200">{t("backtest.overfitting")}</span>
+                      </div>
+                      <div className="space-y-2 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-dark-400">{t("backtest.pbo")}</span>
+                          <span className={`font-mono font-bold ${result.validation.pbo > 0.5 ? "text-okx-red" : result.validation.pbo > 0.3 ? "text-okx-yellow" : "text-okx-green"}`}>
+                            {((result.validation.pbo ?? 0) * 100).toFixed(1)}%
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-dark-400">{t("backtest.dsr")}</span>
+                          <span className={`font-mono font-bold ${result.validation.dsr > 0 ? "text-okx-green" : "text-okx-red"}`}>
+                            {result.validation.dsr.toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-dark-400">{t("backtest.totalAttempts")}</span>
+                          <span className="font-mono text-white">{result.validation.total_attempts}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="card">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Activity size={14} className="text-blue-400" />
+                        <span className="text-xs font-semibold text-dark-200">{t("backtest.significance")}</span>
+                      </div>
+                      <div className="space-y-2 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-dark-400">{t("backtest.nwTStat")}</span>
+                          <span className={`font-mono font-bold ${result.validation.nw_t_stat > 1.65 ? "text-okx-green" : "text-okx-red"}`}>
+                            {result.validation.nw_t_stat.toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-dark-400">{t("backtest.spaPValue")}</span>
+                          <span className={`font-mono font-bold ${result.validation.spa_p_value < 0.05 ? "text-okx-green" : "text-okx-red"}`}>
+                            {result.validation.spa_p_value.toFixed(3)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-dark-400">{t("backtest.bhPassed")}</span>
+                          <span className={`font-mono font-bold ${result.validation.bh_passed ? "text-okx-green" : "text-okx-red"}`}>
+                            {result.validation.bh_passed ? (lang==="zh"?"通过":"PASS") : (lang==="zh"?"未通过":"FAIL")}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Warnings */}
+                  {result.validation.warnings && result.validation.warnings.length > 0 && (
+                    <div className="card border border-okx-yellow/20 bg-okx-yellow/5">
+                      <div className="flex items-center gap-2 mb-2">
+                        <AlertTriangle size={14} className="text-okx-yellow" />
+                        <span className="text-xs font-semibold text-okx-yellow">{lang==="zh"?"验证警告":"Validation Warnings"}</span>
+                      </div>
+                      {result.validation.warnings.map((w: string, i: number) => (
+                        <p key={i} className="text-xs text-dark-300 leading-relaxed">{w}</p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Validation error state */}
+              {result.validation?.error && (
+                <div className="card border-l-4 border-l-okx-yellow">
+                  <div className="flex items-center gap-3">
+                    <AlertTriangle size={18} className="text-okx-yellow" />
+                    <div>
+                      <p className="text-sm font-semibold text-okx-yellow">{t("backtest.validationError")}</p>
+                      <p className="text-xs text-dark-400 mt-0.5 truncate max-w-md">{result.validation.error}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-3 gap-3 text-xs">
                 <div className="card">
                   <span className="text-dark-400">{t("backtest.finalCapital")}</span>

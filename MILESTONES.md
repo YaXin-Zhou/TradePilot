@@ -57,19 +57,19 @@
 
 ### 1.1 日志系统
 
-- [ ] Python `logging` + `RotatingFileHandler`，日志写入 `logs/` 目录
-- [ ] 三个级别：INFO（业务事件：下单/成交/策略切换）、WARNING（重试/降级）、ERROR（异常+堆栈）
-- [ ] `.gitignore` 排除 `logs/`
-- [ ] 前端 `console.log` 替换为结构化日志（仅在 dev 模式输出）
+- [x] Python `logging` + `RotatingFileHandler`，日志写入 `logs/` 目录
+- [x] 三个级别：INFO（业务事件：下单/成交/策略切换）、WARNING（重试/降级）、ERROR（异常+堆栈）
+- [x] `.gitignore` 排除 `logs/`
+- [x] 前端 `console.log` 替换为结构化日志（仅在 dev 模式输出）
 
 **文件：** `backend/core/logger.py`（新建）、各处 `print()` 替换
 
 ### 1.2 全局错误中间件
 
-- [ ] FastAPI `@app.exception_handler` 统一捕获所有未处理异常
-- [ ] 返回统一格式 `{success: false, error: "内部错误", trace_id: "xxx"}`（不暴露内部细节）
-- [ ] 自动脱敏：正则匹配 API Key / Secret 模式并替换为 `***`
-- [ ] 前端 API 客户端的 `request()` 支持 trace_id 回传
+- [x] FastAPI `@app.exception_handler` 统一捕获所有未处理异常
+- [x] 返回统一格式 `{success: false, error: "内部错误", trace_id: "xxx"}`（不暴露内部细节）
+- [x] 自动脱敏：正则匹配 API Key / Secret 模式并替换为 `***`
+- [x] 前端 API 客户端的 `request()` 支持 trace_id 回传
 
 **文件：** `backend/core/errors.py`（新建）、`backend/main.py`、`frontend/lib/api.ts`
 
@@ -94,30 +94,30 @@ backend/
 └── db/               # 数据层（不变）
 ```
 
-- [ ] 将 `api/market.py` 中的业务逻辑迁入 `services/market_service.py`
-- [ ] 将 `api/trading.py` 中的下单逻辑迁入 `services/trading_service.py`
-- [ ] 将 `api/backtest.py` 中的回测逻辑迁入 `services/backtest_service.py`
-- [ ] 将 `api/ai_strategy.py` 中的 AI 调用逻辑迁入 `services/ai_service.py`
-- [ ] 各 API 路由文件简化为：参数校验 → 调用 service → 构造响应
+- [x] 将 `api/market.py` 中的业务逻辑迁入 `services/market_service.py`
+- [x] 将 `api/trading.py` 中的下单逻辑迁入 `services/trading_service.py`
+- [x] 将 `api/backtest.py` 中的回测逻辑迁入 `services/backtest_service.py`
+- [x] 将 `api/ai_strategy.py` 中的 AI 调用逻辑迁入 `services/ai_service.py`
+- [x] 各 API 路由文件简化为：参数校验 → 调用 service → 构造响应
 
 **工作量最大的一项，预计 4-6h**
 
 ### 1.4 核心链路单元测试
 
-- [ ] `tests/test_backtest.py`：验证 MA交叉/RSI/布林带回测逻辑，覆盖多空双边+手续费
-- [ ] `tests/test_ai_engine.py`：Mock DeepSeek 响应，验证 JSON 解析容错（正常/缺失字段/格式错误）
-- [ ] `tests/test_risk.py`：验证最大持仓、日亏损、订单数限制的边界条件
-- [ ] `tests/test_crypto.py`：验证加密/解密/脱敏
+- [x] `tests/test_backtest.py`：验证 MA交叉/RSI/布林带回测逻辑，覆盖多空双边+手续费
+- [x] `tests/test_ai_engine.py`：Mock DeepSeek 响应，验证 JSON 解析容错（正常/缺失字段/格式错误）
+- [x] `tests/test_risk.py`：验证最大持仓、日亏损、订单数限制的边界条件
+- [x] `tests/test_crypto.py`：验证加密/解密/脱敏
 
 **预计覆盖 ~50 个测试用例，文件：** `backend/tests/`（新建）
 
 ### 1.5 前端状态管理 + 数据层
 
-- [ ] 引入 Zustand（~1KB）管理全局状态：`currentSymbol`、`exchangeStatus`、`userPreferences`
-- [ ] 引入 SWR 替代各页面的 `useEffect + setInterval` 轮询模式
-- [ ] WebSocket `useRealtime` 提升到 `_app.tsx` 层级，切换页面不断连
-- [ ] 前端状态持久化：选中的交易对、策略配置写入 `localStorage`，刷新后恢复
-- [ ] 骨架屏组件：仪表盘/交易/回测三个页面的加载态
+- [x] 引入 Zustand（~1KB）管理全局状态：`currentSymbol`、`exchangeStatus`、`userPreferences`
+- [x] 引入 SWR 替代各页面的 `useEffect + setInterval` 轮询模式
+- [x] WebSocket `useRealtime` 保持在 `_app.tsx` 层级，切换页面不断连
+- [x] 前端状态持久化：选中的交易对、策略配置写入 `localStorage`，刷新后恢复
+- [x] 骨架屏组件：仪表盘/交易/回测三个页面的加载态
 
 **文件：** `frontend/store/`（新建）、`frontend/pages/_app.tsx`、`frontend/components/Skeleton.tsx`（新建）
 
@@ -129,38 +129,38 @@ backend/
 
 ### 2.1 样本内外分割 (PBO 基础)
 
-- [ ] 回测引擎增加 IS/OOS 分割：前 70% K 线为样本内，后 30% 为样本外
-- [ ] 回测结果增加 `sharpe_is` / `sharpe_oos` / `max_drawdown_is` / `max_drawdown_oos`
-- [ ] PBO 计算：对样本内数据做 N 次 Bootstrap 重采样，计算每个重采样在样本外的 Sharpe
-- [ ] PBO > 0.5 时前端显示红色警告
+- [x] 回测引擎增加 IS/OOS 分割：前 70% K 线为样本内，后 30% 为样本外
+- [x] 回测结果增加 `sharpe_is` / `sharpe_oos` / `max_drawdown_is` / `max_drawdown_oos`
+- [x] PBO 计算：对样本内数据做 N 次 Bootstrap 重采样，计算每个重采样在样本外的 Sharpe
+- [x] PBO > 0.5 时前端显示红色警告
 
 **文件：** `backend/services/validation.py`（新建）、`backend/strategies/backtest.py`
 
 ### 2.2 BH + DSR 统计检验
 
-- [ ] BH（Benjamini-Hochberg）：给定 N 个策略的 P 值列表，按排序动态调整阈值
-- [ ] DSR（Deflated Sharpe Ratio）：`DSR = Sharpe × sqrt(1 - 1/N)`，N 为尝试策略总数
-- [ ] 回测历史记录增加 `total_attempts` 计数器，每次回测 +1
-- [ ] 回测结果面板展示 BH 筛选结果 + DSR 值
+- [x] BH（Benjamini-Hochberg）：给定 N 个策略的 P 值列表，按排序动态调整阈值
+- [x] DSR（Deflated Sharpe Ratio）：`DSR = Sharpe × sqrt(1 - 1/N)`，N 为尝试策略总数
+- [x] 回测历史记录增加 `total_attempts` 计数器，每次回测 +1
+- [x] 回测结果面板展示 BH 筛选结果 + DSR 值
 
 **文件：** `backend/services/validation.py`
 
 ### 2.3 Newey-West + SPA
 
-- [ ] Newey-West 修正：对资金曲线计算异方差自相关稳健的标准误
-- [ ] 滞后阶数默认 `⌊T^(1/3)⌋`（T 为样本量）
-- [ ] SPA 检验：Bootstrap 重采样 1000 次，计算策略相对基准的 p-value
-- [ ] 以上结果均在回测结果面板中可视化展示
+- [x] Newey-West 修正：对资金曲线计算异方差自相关稳健的标准误
+- [x] 滞后阶数默认 `⌊T^(1/3)⌋`（T 为样本量）
+- [x] SPA 检验：Bootstrap 重采样 1000 次，计算策略相对基准的 p-value
+- [x] 以上结果均在回测结果面板中可视化展示
 
 **文件：** `backend/services/validation.py`
 
 ### 2.4 三道门槛管线
 
-- [ ] **Replay 门槛**：基础回放验证 → 确认策略逻辑可复现（现有回测升级版）
-- [ ] **Scientific 门槛**：运行全部五重检验 → 任一不通过则标记为 "SCIENTIFIC_FAIL"
-- [ ] **Production 门槛**：在模拟盘连续运行 24H → 检查夏普衰减 < 30%、最大回撤 < 40%
-- [ ] 策略状态增加 `validation_stage`（replay / scientific / production / passed）
-- [ ] 前端策略卡片显示当前验证阶段 + 进度条
+- [x] **Replay 门槛**：基础回放验证 → 确认策略逻辑可复现（现有回测升级版）
+- [x] **Scientific 门槛**：运行全部五重检验 → 任一不通过则标记为 "SCIENTIFIC_FAIL"
+- [x] **Production 门槛**：在模拟盘连续运行 24H → 检查夏普衰减 < 30%、最大回撤 < 40%
+- [x] 策略状态增加 `validation_stage`（replay / scientific / production / passed）
+- [x] 前端策略卡片显示当前验证阶段 + 进度条
 
 **文件：** `backend/services/validation_pipeline.py`（新建）、`backend/db/models.py`（Strategy 增加字段）、前端策略页面
 

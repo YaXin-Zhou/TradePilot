@@ -1,43 +1,36 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import PortfolioSummary from "../components/PortfolioSummary";
 import PriceChart from "../components/PriceChart";
-import { api } from "../lib/api";
 import { useLanguage } from "../lib/LanguageContext";
 import { useRealtime } from "../lib/useRealtime";
+import { useMarketRegime, useIndicators, usePrediction, useTradeHistory } from "../lib/swr-config";
 import {
   TrendingUp, TrendingDown, Activity, Brain, RefreshCw,
   ArrowUpRight, ArrowDownRight, Minus
 } from "lucide-react";
 
 export default function Dashboard() {
-  const [refreshKey, setRefreshKey] = useState(0);
   const [ticker, setTicker] = useState<any>(null);
-  const [regime, setRegime] = useState<any>(null);
-  const [prediction, setPrediction] = useState<any>(null);
-  const [indicators, setIndicators] = useState<any>(null);
-  const [trades, setTrades] = useState<any[]>([]);
-  const [ohlcv, setOhlcv] = useState<any[]>([]);
   const { t } = useLanguage();
   useRealtime({ onTicker: setTicker });
 
-  useEffect(() => {
-    api.getMarketRegime().then(setRegime).catch(() => {});
-    api.getIndicators().then(setIndicators).catch(() => {});
-    api.getPrediction().then(setPrediction).catch(() => {});
-    api.getTradeHistory(20).then(setTrades).catch(() => {});
-    api.getOHLCV().then(setOhlcv).catch(() => {});
-  }, [refreshKey]);
+  // SWR 自动轮询替代手动 setInterval
+  const { data: regime, mutate: refreshRegime } = useMarketRegime();
+  const { data: indicators, mutate: refreshIndicators } = useIndicators();
+  const { data: prediction, mutate: refreshPrediction } = usePrediction();
+  const { data: trades = [] } = useTradeHistory(20);
+
+  const refreshAll = () => {
+    refreshRegime();
+    refreshIndicators();
+    refreshPrediction();
+  };
 
   const signalBadge = (signal: string) => {
     if (signal === "buy") return <span className="flex items-center gap-1 text-xs font-medium text-green"><ArrowUpRight size={14} /> BUY</span>;
     if (signal === "sell") return <span className="flex items-center gap-1 text-xs font-medium text-red"><ArrowDownRight size={14} /> SELL</span>;
     return <span className="flex items-center gap-1 text-xs font-medium text-dark-400"><Minus size={14} /> HOLD</span>;
   };
-
-  useEffect(() => {
-    const interval = setInterval(() => setRefreshKey(k => k + 1), 30000);
-    return () => clearInterval(interval);
-  }, []);
 
   return (
     <div className="space-y-6">
@@ -47,18 +40,18 @@ export default function Dashboard() {
           <p className="text-xs text-dark-400 mt-1">{t("dash.overviewSub")}</p>
         </div>
         <button
-          onClick={() => setRefreshKey((k) => k + 1)}
+          onClick={refreshAll}
           className="btn-ghost flex items-center gap-2 text-xs"
         >
           <RefreshCw size={14} /> {t("dash.refresh")}
         </button>
       </div>
 
-      <PortfolioSummary refreshKey={refreshKey} />
+      <PortfolioSummary refreshKey={0} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
-            <PriceChart refreshKey={refreshKey} ticker={ticker} />
+            <PriceChart ticker={ticker} />
             </div>
         </div>
 
@@ -207,7 +200,7 @@ export default function Dashboard() {
                   </td>
                 </tr>
               )}
-              {trades.slice(0, 10).map((t) => (
+              {trades.slice(0, 10).map((t: any) => (
                 <tr key={t.id} className="border-b border-dark-800/50 hover:bg-dark-800/30">
                   <td className="py-2.5 pr-4 font-medium text-dark-200">{t.symbol}</td>
                   <td className="text-right px-2 py-2 font-mono">${t.buy_price?.toFixed(2)}</td>

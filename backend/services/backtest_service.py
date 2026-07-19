@@ -1,4 +1,4 @@
-"""回测服务层"""
+"""回测服务层 — 集成统计验证 + 计数器"""
 import json
 import time as timemod
 import pathlib
@@ -8,6 +8,7 @@ from core.exchange import shared_exchange, ExchangeClient
 from config import settings
 from strategies.backtest import BacktestEngine
 from core.logger import log
+from services.validation import run_full_validation
 
 # 独立的 exchange 客户端（回测用，避免抢占 shared_exchange）
 _backtest_exchange = ExchangeClient(
@@ -20,12 +21,13 @@ _backtest_exchange = ExchangeClient(
 
 HISTORY_DIR = pathlib.Path(__file__).parent.parent / "data"
 HISTORY_FILE = HISTORY_DIR / "backtest_history.json"
+ATTEMPTS_FILE = HISTORY_DIR / "total_attempts.json"
 
 
 def _mock_ohlcv(count=500):
     data = []
     price = 85000
-    t = int(time.time() * 1000) - count * 3600000
+    t = int(timemod.time() * 1000) - count * 3600000
     for i in range(count):
         change = random.uniform(-400, 400)
         vol = random.uniform(50, 200)
@@ -69,6 +71,59 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int) -> tuple[pd.DataFrame, 
     return _to_df(raw), True
 
 
+# ─── 累计策略尝试次数 ─────────────────────────────────────────
+
+
+def _load_attempts() -> int:
+    """加载累计策略尝试次数"""
+    try:
+        if ATTEMPTS_FILE.exists():
+            data = json.loads(ATTEMPTS_FILE.read_text())
+            return data.get("total_attempts", 1)
+    except Exception:
+        pass
+    return 1
+
+
+def _increment_attempts() -> int:
+    """增量 +1 并返回新的 total_attempts"""
+    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    current = _load_attempts()
+    new_val = current + 1
+    ATTEMPTS_FILE.write_text(json.dumps({"total_attempts": new_val}))
+    return new_val
+
+
+def get_total_attempts() -> int:
+    """获取当前累计尝试次数"""
+    return _load_attempts()
+
+
+def reset_attempts():
+    """重置计数器"""
+    ATTEMPTS_FILE.write_text(json.dumps({"total_attempts": 1}))
+
+
+# ─── 策略回测运行器工厂 ────────────────────────────────────────
+
+
+def _make_strategy_runner(strategy_type: str):
+    """创建策略运行器闭包（供 validation 模块使用）"""
+    def runner(df: pd.DataFrame, **params) -> any:
+        engine = BacktestEngine(df, 10000, position_size_pct=0.95, trading_fee_pct=0.001, slippage_pct=0.001)
+        if strategy_type == "ma_crossover":
+            return engine.run_ma_crossover(params.get("fast_period", 10), params.get("slow_period", 30))
+        elif strategy_type == "rsi":
+            return engine.run_rsi(params.get("period", 14), params.get("oversold", 30), params.get("overbought", 70))
+        elif strategy_type == "bollinger":
+            return engine.run_bollinger(params.get("period", 20), params.get("std_dev", 2.0))
+        raise ValueError(f"Unknown strategy: {strategy_type}")
+    return runner
+
+
+# ─── 主入口 ────────────────────────────────────────────────────
+
+
 def run_backtest(
     ohlcv_df: pd.DataFrame,
     strategy_type: str,
@@ -77,8 +132,9 @@ def run_backtest(
     position_size_pct: float = 0.95,
     trading_fee_pct: float = 0.001,
     slippage_pct: float = 0.001,
+    with_validation: bool = True,
 ) -> dict:
-    """执行回测。返回结果字典"""
+    """执行回测 + 可选统计验证。返回结果字典"""
     if ohlcv_df is None or len(ohlcv_df) < 30:
         raise ValueError(f"Not enough data for backtest: {len(ohlcv_df) if ohlcv_df is not None else 0} bars")
 
@@ -105,7 +161,7 @@ def run_backtest(
     else:
         raise ValueError(f"Unknown strategy: {strategy_type}")
 
-    return {
+    base = {
         "symbol": result.symbol,
         "bars": result.bars,
         "strategy_name": result.strategy_name,
@@ -129,6 +185,49 @@ def run_backtest(
         "equity_curve": result.equity_curve,
     }
 
+    # 统计验证
+    if with_validation:
+        total_attempts = _increment_attempts()
+        try:
+            runner = _make_strategy_runner(strategy_type)
+            validation = run_full_validation(
+                data=ohlcv_df,
+                strategy_runner=runner,
+                strategy_type=strategy_type,
+                params=params,
+                equity_curve=result.equity_curve,
+                total_attempts=total_attempts,
+            )
+            base["validation"] = {
+                "sharpe_is": validation.sharpe_is,
+                "sharpe_oos": validation.sharpe_oos,
+                "max_dd_is": validation.max_dd_is,
+                "max_dd_oos": validation.max_dd_oos,
+                "is_bars": validation.is_bars,
+                "oos_bars": validation.oos_bars,
+                "pbo": validation.pbo,
+                "pbo_warning": validation.pbo_warning,
+                "dsr": validation.dsr,
+                "total_attempts": total_attempts,
+                "nw_se": validation.nw_se,
+                "nw_t_stat": validation.nw_t_stat,
+                "nw_lags": validation.nw_lags,
+                "bh_passed": validation.bh_passed,
+                "bh_threshold": validation.bh_threshold,
+                "spa_p_value": validation.spa_p_value,
+                "spa_passed": validation.spa_passed,
+                "scientific_passed": validation.scientific_passed,
+                "warnings": validation.warnings,
+            }
+        except Exception as e:
+            log.warning(f"Validation skipped: {e}")
+            base["validation"] = {"error": str(e)[:200]}
+
+    return base
+
+
+# ─── 历史管理 ──────────────────────────────────────────────────
+
 
 def save_to_history(strategy_type: str, symbol: str, timeframe: str, capital: float, params: dict, result: dict):
     """保存回测结果到历史文件"""
@@ -137,7 +236,7 @@ def save_to_history(strategy_type: str, symbol: str, timeframe: str, capital: fl
         records = []
         if HISTORY_FILE.exists():
             records = json.loads(HISTORY_FILE.read_text())
-        records.insert(0, {
+        entry = {
             "id": int(timemod.time()),
             "strategy": strategy_type,
             "symbol": symbol,
@@ -155,7 +254,18 @@ def save_to_history(strategy_type: str, symbol: str, timeframe: str, capital: fl
                 "final_capital": result.get("final_capital", 0),
             }.items()},
             "created_at": timemod.strftime("%Y-%m-%d %H:%M:%S"),
-        })
+        }
+        # 附带验证摘要
+        if result.get("validation") and not result["validation"].get("error"):
+            v = result["validation"]
+            entry["validation"] = {
+                "sharpe_is": v.get("sharpe_is", 0),
+                "sharpe_oos": v.get("sharpe_oos", 0),
+                "pbo": v.get("pbo", 0),
+                "dsr": v.get("dsr", 0),
+                "scientific_passed": v.get("scientific_passed", False),
+            }
+        records.insert(0, entry)
         HISTORY_FILE.write_text(json.dumps(records[:100], ensure_ascii=False, indent=2))
     except Exception as e:
         log.error(f"Failed to save backtest history: {e}")
@@ -175,6 +285,7 @@ def clear_history():
     """清空回测历史"""
     try:
         HISTORY_FILE.write_text("[]")
+        reset_attempts()
         return True
     except Exception:
         return False

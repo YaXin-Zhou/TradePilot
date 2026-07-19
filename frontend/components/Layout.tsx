@@ -7,6 +7,8 @@ import {
 } from "lucide-react";
 import { getToken, clearToken } from "../lib/api"
 import { useLanguage } from "../lib/LanguageContext";
+import { useExchangeStatus } from "../lib/swr-config";
+import { useAppStore } from "../store/useAppStore";
 
 const NAV_ITEMS = [
   { label: "nav.dashboard", icon: LayoutDashboard, href: "/", color: "#00c076" },
@@ -21,23 +23,24 @@ const NAV_ITEMS = [
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
-  const [exchangeStatus, setExchangeStatus] = useState<any>({ connected: true, testnet: true, has_api_key: false });
   const router = useRouter();
   const { t, lang, toggleLang } = useLanguage();
-  const isMock = exchangeStatus && !exchangeStatus.connected;
 
+  // SWR 自动轮询交易所状态（替代硬编码 fetch + setInterval）
+  const { data: exchangeStatus } = useExchangeStatus();
+  const setExchangeStatus = useAppStore((s) => s.setExchangeStatus);
+
+  // 同步到全局 store
   useEffect(() => {
-    const check = async () => {
-      try {
-        const res = await fetch("http://127.0.0.1:8000/api/exchange/status");
-        const json = await res.json();
-        if (json.success) setExchangeStatus(json.data);
-      } catch {}
-    };
-    check();
-    const iv = setInterval(check, 30000);
-    return () => clearInterval(iv);
-  }, []);
+    if (exchangeStatus) {
+      setExchangeStatus(
+        exchangeStatus.connected ?? false,
+        exchangeStatus.testnet ?? true
+      );
+    }
+  }, [exchangeStatus, setExchangeStatus]);
+
+  const isMock = !exchangeStatus?.connected;
 
   return (
     <div className="flex h-screen overflow-hidden bg-dark-950">

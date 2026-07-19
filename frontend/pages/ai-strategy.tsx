@@ -18,7 +18,7 @@ export default function AIStrategyPage() {
   useEffect(() => {
     api.getTicker().then(setTicker).catch(() => {});
     api.getBalance().then(setBalance).catch(() => {});
-    api.testAIConnection("").then(() => setConnected(true)).catch(() => setConnected(false));
+    api.testAIConnection().then(() => setConnected(true)).catch(() => setConnected(false));
   }, []);
 
   const analyze = async () => {

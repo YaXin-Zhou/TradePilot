@@ -125,12 +125,13 @@ export const api = {
   getMarketRegime: (symbol = "BTC/USDT", timeframe = "1h") =>
     request(`/api/analysis/market-regime?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}`),
   // Backtest
-  runBacktest: (data: { strategy: string; symbol?: string; timeframe?: string; limit?: number; capital?: number; params?: any }) =>
+  runBacktest: (data: { strategy: string; symbol?: string; timeframe?: string; limit?: number; capital?: number; position_size?: number; trading_fee?: number; slippage?: number; params?: any }) =>
     request("/api/backtest/run", { method: "POST", body: JSON.stringify(data) }),
   getBacktestData: (data: { symbol?: string; timeframe?: string; limit?: number }) =>
     request("/api/backtest/data", { method: "POST", body: JSON.stringify(data) }),
   getBacktestHistory: () => request("/api/backtest/history"),
   clearBacktestHistory: () => request("/api/backtest/history/clear", { method: "POST" }),
+  getBacktestStats: () => request("/api/backtest/stats"),
   // Settings
   getExchangeSettings: () => request("/api/settings/exchange"),
   saveExchangeSettings: (data: { api_key: string; secret: string; passphrase: string; testnet: boolean }) =>

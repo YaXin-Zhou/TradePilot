@@ -2,6 +2,7 @@
 from fastapi import APIRouter
 from services.backtest_service import (
     fetch_ohlcv, run_backtest, save_to_history, get_history, clear_history,
+    get_total_attempts, reset_attempts,
     _mock_ohlcv, _to_df,
 )
 import pandas as pd
@@ -68,3 +69,20 @@ async def api_clear_history():
     if ok:
         return {"success": True, "data": {"cleared": True}}
     return {"success": False, "error": "Failed to clear history"}
+
+
+@router.get("/stats")
+async def api_backtest_stats():
+    """查看回测统计：总尝试次数、最近验证通过率"""
+    history = get_history()
+    total = len(history)
+    scientific_passed = sum(1 for h in history if h.get("validation", {}).get("scientific_passed"))
+    return {
+        "success": True,
+        "data": {
+            "total_attempts": get_total_attempts(),
+            "total_records": total,
+            "scientific_passed": scientific_passed,
+            "pass_rate": round(scientific_passed / total * 100, 1) if total > 0 else 0,
+        },
+    }
