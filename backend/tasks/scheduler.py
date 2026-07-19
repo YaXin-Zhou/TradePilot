@@ -81,14 +81,31 @@ async def ai_heartbeat():
         log.error(f"AI Heartbeat failed: {e}")
 
 
+async def refresh_kill_switch():
+    """P0-1: 每 5 秒从 DB 刷新 kill_switch + risk_engine 状态
+
+    多 worker 场景下，一个 worker 触发 kill_switch 后，
+    其他 worker 通过此任务检测到状态变化。
+    """
+    try:
+        from core.kill_switch import kill_switch
+        from services.risk_engine import risk_engine
+        await kill_switch.refresh_from_db()
+        await risk_engine.refresh_from_db()
+    except Exception as e:
+        log.debug(f"Kill switch refresh failed: {e}")
+
+
 def start_scheduler():
     scheduler.add_job(sync_market_data, IntervalTrigger(hours=1), id="sync_market_data", replace_existing=True)
     scheduler.add_job(retrain_ml_models, IntervalTrigger(hours=24), id="retrain_ml_models", replace_existing=True)
     scheduler.add_job(ai_heartbeat, IntervalTrigger(hours=6), id="ai_heartbeat", replace_existing=True)
+    # P0-1: kill_switch + risk_engine 多 worker 状态同步（每 5 秒刷新）
+    scheduler.add_job(refresh_kill_switch, IntervalTrigger(seconds=5), id="refresh_kill_switch", replace_existing=True)
     # Phase 8: 任务执行监听（异常隔离 + 记录）
     scheduler.add_listener(_job_listener, EVENT_JOB_ERROR | EVENT_JOB_EXECUTED)
     scheduler.start()
-    log.info("Scheduler started (market data: 1h, ML retrain: 24h, AI heartbeat: 6h)")
+    log.info("Scheduler started (market data: 1h, ML retrain: 24h, AI heartbeat: 6h, kill_switch refresh: 5s)")
 
 
 def stop_scheduler():

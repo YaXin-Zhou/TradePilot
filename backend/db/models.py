@@ -247,3 +247,46 @@ class RunnerState(Base):
     locked_by = Column(String(64), nullable=True)        # instance_id，乐观锁
     lock_expires = Column(DateTime, nullable=True)
     extra = Column(JSON, default=dict)                   # 扩展字段（网格状态等）
+
+
+# ---------------------------------------------------------------------------
+# P0-1 · kill_switch + risk_engine 迁入 DB（消除 JSON 文件竞态）
+# ---------------------------------------------------------------------------
+
+class KillSwitchStateRecord(Base):
+    """Kill switch 状态 — 替代 kill_switch.json，支持多 worker 一致性
+
+    单行表（id 恒为 1），存储全局紧急停止状态。
+    多 worker 共享同一行，一个 worker 触发后其他 worker 可通过 refresh 读取。
+    """
+    __tablename__ = "kill_switch_state"
+    id = Column(Integer, primary_key=True, default=1)  # 单行表
+    status = Column(String(16), default="ARMED")       # ARMED / TRIGGERED
+    triggered_at = Column(Float, nullable=True)        # Unix timestamp
+    triggered_by = Column(String(64), nullable=True)
+    reason = Column(Text, nullable=True)
+    actions_taken = Column(JSON, default=list)
+    orders_cancelled = Column(Integer, default=0)
+    positions_closed = Column(Integer, default=0)
+    strategies_stopped = Column(Integer, default=0)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class RiskPolicyRecord(Base):
+    """风控策略 — 替代 risk_policies.json，支持多 worker 一致性
+
+    每个 MarketRegime 一行，存储该 regime 的风控参数。
+    """
+    __tablename__ = "risk_policies"
+    regime = Column(String(32), primary_key=True)       # MarketRegime.value
+    max_position_pct = Column(Float, default=0.3)
+    max_single_strategy_pct = Column(Float, default=0.15)
+    max_daily_loss_pct = Column(Float, default=5.0)
+    stop_loss_pct = Column(Float, default=8.0)
+    trailing_stop_pct = Column(Float, default=3.0)
+    min_sharpe_entry = Column(Float, default=0.8)
+    max_correlation = Column(Float, default=0.7)
+    time_stop_hours = Column(Integer, default=72)
+    atr_stop_multiplier = Column(Float, default=2.0)
+    allowed_strategies = Column(JSON, default=list)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)

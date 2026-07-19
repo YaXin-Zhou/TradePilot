@@ -7,15 +7,18 @@
   3. 日亏损熔断 — 触达则暂停所有策略
   4. 策略相关性 — 过高则自动降权
   5. 新策略入场门槛 — 最低 Sharpe 要求
+
+P0-1 修复：策略持久化从 JSON 文件迁入 DB（risk_policies 表），
+消除多 worker 下 JSON 文件竞态覆盖问题。
+内存为读源（快速同步读取），DB 为持久化层（多 worker 一致性）。
 """
 from __future__ import annotations
 
-import json
+import asyncio
 import math
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional
 
 from core.logger import log
@@ -135,24 +138,91 @@ DEFAULT_POLICIES: dict[MarketRegime, RiskPolicy] = {
     ),
 }
 
+# DB 字段名 ↔ RiskPolicy 字段名映射
+_POLICY_FIELDS = [
+    "max_position_pct", "max_single_strategy_pct", "max_daily_loss_pct",
+    "stop_loss_pct", "trailing_stop_pct", "min_sharpe_entry",
+    "max_correlation", "time_stop_hours", "atr_stop_multiplier",
+    "allowed_strategies",
+]
+
 # ------------------------------------------------------------------
 # 引擎
 # ------------------------------------------------------------------
 
 
 class RiskEngine:
-    """风控规则引擎"""
+    """风控规则引擎
 
-    POLICIES_FILE = Path(__file__).parent.parent / "data" / "risk_policies.json"
+    P0-1: 策略持久化到 DB（risk_policies 表）。
+    - 内存策略为读源（sync 快速读取）
+    - 写操作内存更新后 fire-and-forget 异步写 DB
+    - 启动时从 DB 加载（init_from_db）
+    - 多 worker 可通过 refresh_from_db 同步状态
+    """
 
     def __init__(self):
         self._policies: dict[MarketRegime, RiskPolicy] = {}
         self._daily_pnl: dict[str, float] = {}     # user_id → daily PnL
         self._daily_reset: float = time.time()
-        self._load_policies()
+        self._db_ready = False
+        # 加载默认值（内存）
+        for regime in MarketRegime:
+            self._policies[regime] = DEFAULT_POLICIES[regime]
 
     # ------------------------------------------------------------------
-    # 策略管理
+    # DB 初始化与刷新（异步，启动时调用）
+    # ------------------------------------------------------------------
+
+    async def init_from_db(self):
+        """从 DB 加载策略覆盖（lifespan 启动时调用）"""
+        try:
+            from db.database import async_session
+            from db.models import RiskPolicyRecord
+            from sqlalchemy import select
+
+            async with async_session() as session:
+                result = await session.execute(select(RiskPolicyRecord))
+                records = result.scalars().all()
+                loaded = 0
+                for record in records:
+                    try:
+                        regime = MarketRegime(record.regime)
+                        kwargs = {f: getattr(record, f) for f in _POLICY_FIELDS}
+                        self._policies[regime] = RiskPolicy(regime=regime, **kwargs)
+                        loaded += 1
+                    except (ValueError, TypeError):
+                        pass
+                log.info(f"RiskEngine: loaded {loaded} policy overrides from DB")
+            self._db_ready = True
+        except Exception as e:
+            log.warning(f"RiskEngine: DB init failed ({e}), using defaults")
+            self._db_ready = True
+
+    async def refresh_from_db(self):
+        """从 DB 重新加载策略（多 worker 同步，定时调用）"""
+        if not self._db_ready:
+            return
+        try:
+            from db.database import async_session
+            from db.models import RiskPolicyRecord
+            from sqlalchemy import select
+
+            async with async_session() as session:
+                result = await session.execute(select(RiskPolicyRecord))
+                records = result.scalars().all()
+                for record in records:
+                    try:
+                        regime = MarketRegime(record.regime)
+                        kwargs = {f: getattr(record, f) for f in _POLICY_FIELDS}
+                        self._policies[regime] = RiskPolicy(regime=regime, **kwargs)
+                    except (ValueError, TypeError):
+                        pass
+        except Exception as e:
+            log.debug(f"RiskEngine: DB refresh failed ({e})")
+
+    # ------------------------------------------------------------------
+    # 策略管理（同步，读内存）
     # ------------------------------------------------------------------
 
     def get_policy(self, regime: MarketRegime) -> RiskPolicy:
@@ -171,7 +241,7 @@ class RiskEngine:
             if hasattr(policy, k):
                 setattr(policy, k, v)
         self._policies[regime] = policy
-        self._save_policies()
+        self._persist()
         log.info(f"RiskEngine: policy updated for {regime.value}")
         return policy
 
@@ -180,11 +250,11 @@ class RiskEngine:
 
     def reset_to_defaults(self):
         self._policies = dict(DEFAULT_POLICIES)
-        self._save_policies()
+        self._persist()
         log.info("RiskEngine: policies reset to defaults")
 
     # ------------------------------------------------------------------
-    # 核心检查
+    # 核心检查（同步，读内存）
     # ------------------------------------------------------------------
 
     def check_strategy_entry(self, regime: MarketRegime, strategy_type: str,
@@ -346,33 +416,49 @@ class RiskEngine:
             return 0.0
         return max(abs(self._pearson_corr(strat_ret, r)) for r in pool.values())
 
-    def _load_policies(self):
-        try:
-            if self.POLICIES_FILE.exists():
-                raw = json.loads(self.POLICIES_FILE.read_text(encoding="utf-8"))
-                for key, data in raw.items():
-                    try:
-                        regime = MarketRegime(key)
-                        self._policies[regime] = RiskPolicy(regime=regime, **data)
-                    except (ValueError, TypeError):
-                        pass
-                log.info(f"RiskEngine: loaded {len(self._policies)} policy overrides")
-        except Exception as e:
-            log.warning(f"RiskEngine: failed to load policies ({e}), using defaults")
+    # ------------------------------------------------------------------
+    # 持久化（fire-and-forget 异步写 DB）
+    # ------------------------------------------------------------------
 
-        # 填充默认值
-        for regime in MarketRegime:
-            if regime not in self._policies:
-                self._policies[regime] = DEFAULT_POLICIES[regime]
-
-    def _save_policies(self):
+    def _persist(self):
+        """调度异步 DB 写入（不阻塞调用方）"""
+        if not self._db_ready:
+            return
         try:
-            self.POLICIES_FILE.parent.mkdir(parents=True, exist_ok=True)
-            data = {r.value: p.to_dict() for r, p in self._policies.items()
-                    if r in MarketRegime}
-            self.POLICIES_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._save_to_db())
+        except RuntimeError:
+            # 无事件循环（同步脚本中调用）— 跳过 DB 写入
+            pass
+
+    async def _save_to_db(self):
+        """异步写入 DB（全量 upsert）"""
+        try:
+            from db.database import async_session
+            from db.models import RiskPolicyRecord
+            from sqlalchemy import select
+
+            async with async_session() as session:
+                for regime, policy in self._policies.items():
+                    if regime not in MarketRegime:
+                        continue
+                    existing = await session.scalar(
+                        select(RiskPolicyRecord).where(
+                            RiskPolicyRecord.regime == regime.value
+                        )
+                    )
+                    if existing:
+                        for f in _POLICY_FIELDS:
+                            setattr(existing, f, getattr(policy, f))
+                    else:
+                        record = RiskPolicyRecord(
+                            regime=regime.value,
+                            **{f: getattr(policy, f) for f in _POLICY_FIELDS}
+                        )
+                        session.add(record)
+                await session.commit()
         except Exception as e:
-            log.error(f"RiskEngine: failed to save policies: {e}")
+            log.error(f"RiskEngine: DB save failed: {e}")
 
 
 # 全局单例

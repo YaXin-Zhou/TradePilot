@@ -37,6 +37,7 @@ class Base(DeclarativeBase):
 async def init_db():
     from db.models import User, Strategy, Order, Trade, Position, MarketData, MLPrediction
     from db.models import AuditLog, ExchangeCredential, RunnerState  # M1: 新增三张表
+    from db.models import KillSwitchStateRecord, RiskPolicyRecord     # P0-1: JSON 迁 DB
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         # M1: 迁移已有 orders 表 — 添加 account_id / idempotency_key / raw 字段
@@ -44,6 +45,9 @@ async def init_db():
 
     # P0-2: PostgreSQL 枚举补值（必须在事务外运行，ALTER TYPE ADD VALUE 在 PG<12 不支持事务）
     await _migrate_strategytype_enum()
+
+    # P0-1: 从 JSON 文件迁移旧数据到 DB（一次性）
+    await _migrate_json_to_db()
 
 
 def _migrate_orders_table(conn):
@@ -112,6 +116,79 @@ async def _migrate_strategytype_enum():
                 except Exception as e:
                     # 非致命：仅警告，不阻断启动
                     print(f"[P0-2] WARN: strategytype + {val} failed: {e}")
+
+
+async def _migrate_json_to_db():
+    """P0-1: 从 JSON 文件迁移旧数据到 DB（一次性，幂等）
+
+    将 kill_switch.json 和 risk_policies.json 中的旧数据导入 DB 表。
+    迁移成功后重命名 JSON 文件为 .migrated（保留备份，不删除）。
+    """
+    import json
+    from pathlib import Path
+    from db.models import KillSwitchStateRecord, RiskPolicyRecord
+
+    data_dir = Path(settings.ROOT) / "data"
+    ks_file = data_dir / "kill_switch.json"
+    rp_file = data_dir / "risk_policies.json"
+
+    async with async_session() as session:
+        # 1) 迁移 kill_switch.json
+        if ks_file.exists():
+            try:
+                raw = json.loads(ks_file.read_text(encoding="utf-8"))
+                existing = await session.get(KillSwitchStateRecord, 1)
+                if not existing:
+                    record = KillSwitchStateRecord(
+                        id=1,
+                        status=raw.get("status", "ARMED"),
+                        triggered_at=raw.get("triggered_at"),
+                        triggered_by=raw.get("triggered_by"),
+                        reason=raw.get("reason"),
+                        actions_taken=raw.get("actions_taken", []),
+                        orders_cancelled=raw.get("orders_cancelled", 0),
+                        positions_closed=raw.get("positions_closed", 0),
+                        strategies_stopped=raw.get("strategies_stopped", 0),
+                    )
+                    session.add(record)
+                    await session.commit()
+                    print("[P0-1] Migrated: kill_switch.json → DB")
+                # 重命名旧文件（replace 覆盖已存在的 .migrated 文件）
+                ks_file.replace(ks_file.with_suffix(".json.migrated"))
+            except Exception as e:
+                print(f"[P0-1] WARN: kill_switch.json migration failed: {e}")
+
+        # 2) 迁移 risk_policies.json
+        if rp_file.exists():
+            try:
+                raw = json.loads(rp_file.read_text(encoding="utf-8"))
+                for regime_key, data in raw.items():
+                    from sqlalchemy import select
+                    existing = await session.scalar(
+                        select(RiskPolicyRecord).where(
+                            RiskPolicyRecord.regime == regime_key
+                        )
+                    )
+                    if not existing:
+                        record = RiskPolicyRecord(
+                            regime=regime_key,
+                            max_position_pct=data.get("max_position_pct", 0.3),
+                            max_single_strategy_pct=data.get("max_single_strategy_pct", 0.15),
+                            max_daily_loss_pct=data.get("max_daily_loss_pct", 5.0),
+                            stop_loss_pct=data.get("stop_loss_pct", 8.0),
+                            trailing_stop_pct=data.get("trailing_stop_pct", 3.0),
+                            min_sharpe_entry=data.get("min_sharpe_entry", 0.8),
+                            max_correlation=data.get("max_correlation", 0.7),
+                            time_stop_hours=data.get("time_stop_hours", 72),
+                            atr_stop_multiplier=data.get("atr_stop_multiplier", 2.0),
+                            allowed_strategies=data.get("allowed_strategies", []),
+                        )
+                        session.add(record)
+                await session.commit()
+                print("[P0-1] Migrated: risk_policies.json → DB")
+                rp_file.replace(rp_file.with_suffix(".json.migrated"))
+            except Exception as e:
+                print(f"[P0-1] WARN: risk_policies.json migration failed: {e}")
 
 
 async def get_session() -> AsyncSession:

@@ -37,6 +37,11 @@ async def lifespan(app: FastAPI):
     await load_exchange_config()
     await load_deepseek_config()
 
+    # P0-1: kill_switch + risk_engine 从 DB 加载状态（替代 JSON 文件）
+    await kill_switch.init_from_db()
+    from services.risk_engine import risk_engine
+    await risk_engine.init_from_db()
+
     # Phase 8: kill_switch 状态检查
     if kill_switch.is_triggered:
         log.warning(
