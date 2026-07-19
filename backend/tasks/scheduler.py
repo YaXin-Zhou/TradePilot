@@ -1,3 +1,4 @@
+import asyncio
 """APScheduler 定时任务"""
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -20,7 +21,7 @@ async def sync_market_data():
         strategies = result.scalars().all()
         for s in strategies:
             try:
-                df = shared_exchange.fetch_ohlcv(s.symbol, "1h", 200)
+                df = await asyncio.to_thread(shared_exchange.fetch_ohlcv, s.symbol, "1h", 200)
                 if df is not None and not df.empty:
                     for _, row in df.iterrows():
                         ts = row["timestamp"]
@@ -52,7 +53,7 @@ async def retrain_ml_models():
         symbols = set(s.symbol for s in result.scalars().all())
         for symbol in symbols:
             try:
-                import asyncio; await asyncio.to_thread(train_model, symbol, "1h", 1000)
+                await asyncio.to_thread(train_model, symbol, "1h", 1000)
             except Exception:
                 pass
 

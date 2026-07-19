@@ -4,11 +4,12 @@ OKX 交易所客户端 - 基于 CCXT 封装
 import ccxt
 import pandas as pd
 import os
+import time
 from typing import Optional
 
 
 # Global connectivity flag (shared across instances)
-_connected: bool = True
+_connected: bool = True  # NOTE: managed by ExchangeClient._connected now
 
 
 def set_connected(value: bool):
@@ -34,15 +35,14 @@ class ExchangeClient:
         exchange_class = getattr(ccxt, exchange_name)
         params = {
             "enableRateLimit": True,
-        "timeout": 1500,
+        "timeout": 8000,
             "options": {"defaultType": "spot"},
         }
         # Auto-detect proxy from env vars
         proxy_url = (
-            os.environ.get("HTTPS_PROXY") or
-            os.environ.get("HTTP_PROXY") or
-            os.environ.get("https_proxy") or
-            os.environ.get("http_proxy") or
+            settings.HTTPS_PROXY or settings.HTTP_PROXY or
+            os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or
+            os.environ.get("https_proxy") or os.environ.get("http_proxy") or
             ""
         )
         if proxy_url:
@@ -62,19 +62,34 @@ class ExchangeClient:
                 pass
         self._markets_loaded = False
         self._testnet = testnet
-        # Start in offline mode; background task will try to connect
-        global _connected
-        self._connected = _connected
+        self._connected = False
         self._name = exchange_name
+        self._last_attempt = time.time()
+        self._retry_interval = 60
 
 
     def _ensure_markets(self):
-        if not self._markets_loaded and self._connected:
+        if not self._markets_loaded:
             try:
                 self._exchange.load_markets()
-            except Exception:
+                self._markets_loaded = True
                 self._connected = False
-            self._markets_loaded = True
+            except Exception:
+                self._last_attempt = time.time()
+                self._markets_loaded = False
+
+    def _try_reconnect(self):
+        if self._connected:
+            return True
+        if time.time() - self._last_attempt > self._retry_interval:
+            try:
+                self._exchange.load_markets()
+                self._markets_loaded = True
+                self._connected = True
+                return True
+            except Exception:
+                self._last_attempt = time.time()
+        return self._connected
 
     @property
     def name(self) -> str:
@@ -85,24 +100,33 @@ class ExchangeClient:
         return self._testnet
 
     def fetch_ticker(self, symbol: str) -> dict:
-        if not self._connected: raise ConnectionError('offline')
-        t = self._exchange.fetch_ticker(symbol)
-        return {
-            "symbol": symbol,
-            "bid": float(t.get("bid", 0)),
-            "ask": float(t.get("ask", 0)),
-            "last": float(t.get("last", 0)),
-            "high": float(t.get("high", 0)),
-            "low": float(t.get("low", 0)),
-            "volume": float(t.get("baseVolume", 0)),
-            "quote_volume": float(t.get("quoteVolume", 0)),
-            "change_pct": float(t.get("percentage", 0)),
-            "timestamp": t.get("timestamp", 0),
-        }
-
-    def fetch_ohlcv(self, symbol: str, timeframe: str = "1h", limit: int = 200) -> pd.DataFrame:
+        self._try_reconnect()
         if not self._connected:
-            raise ConnectionError('offline')
+            raise ConnectionError("offline")
+        try:
+            t = self._exchange.fetch_ticker(symbol)
+            self._connected = False
+            return {
+                "symbol": symbol,
+                "bid": float(t.get("bid", 0)),
+                "ask": float(t.get("ask", 0)),
+                "last": float(t.get("last", 0)),
+                "high": float(t.get("high", 0)),
+                "low": float(t.get("low", 0)),
+                "volume": float(t.get("baseVolume", 0)),
+                "quote_volume": float(t.get("quoteVolume", 0)),
+                "change_pct": float(t.get("percentage", 0)),
+                "timestamp": t.get("timestamp", 0),
+            }
+        except Exception as e:
+            self._connected = False
+            self._last_attempt = time.time()
+            raise ConnectionError(f"offline: {e}")
+
+    def fetch_ohlcv(self, symbol: str, timeframe: str = "1h", limit: int = 200):
+        self._try_reconnect()
+        if not self._connected:
+            raise ConnectionError("offline")
         ohlcv = self._exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
         df = pd.DataFrame(
             ohlcv,
@@ -113,8 +137,9 @@ class ExchangeClient:
         return df
 
     def fetch_orderbook(self, symbol: str, limit: int = 20) -> dict:
+        self._try_reconnect()
         if not self._connected:
-            raise ConnectionError('offline')
+            raise ConnectionError("offline")
         ob = self._exchange.fetch_order_book(symbol, limit)
         return {
             "bids": [[float(p), float(v)] for p, v in ob.get("bids", [])],
@@ -124,6 +149,7 @@ class ExchangeClient:
 
     def fetch_balance(self, currency: Optional[str] = None) -> dict:
         self._ensure_markets()
+        self._try_reconnect()
         if not self._connected:
             raise ConnectionError('offline')
         bal = self._exchange.fetch_balance()

@@ -1,6 +1,6 @@
 """交易所连接状态 API"""
 from fastapi import APIRouter
-from core.exchange import ExchangeClient, _connected, ExchangeError, shared_exchange as _exchange
+from core.exchange import ExchangeClient, ExchangeError, shared_exchange as _exchange
 from config import settings
 import time
 
@@ -11,22 +11,15 @@ router = APIRouter(prefix="/api/exchange", tags=["exchange"])
 async def exchange_status():
     """返回交易所连接状态和最近错误"""
     result = {
-        "connected": _connected,
+        "connected": _exchange._connected,
         "exchange": settings.EXCHANGE_NAME,
         "testnet": settings.EXCHANGE_TESTNET,
         "has_api_key": bool(settings.EXCHANGE_API_KEY),
         "last_error": None,
         "latency_ms": None,
     }
-    if _connected:
-        try:
-            t0 = time.time()
-            t = _exchange.fetch_ticker(settings.DEFAULT_SYMBOL)
-            result["latency_ms"] = int((time.time() - t0) * 1000)
-            result["last_price"] = t.get("last")
-        except Exception as e:
-            result["connected"] = False
-            result["last_error"] = str(e)
+    if _exchange._connected:
+        result["connected"] = True
     return {"success": True, "data": result}
 
 

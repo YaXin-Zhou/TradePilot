@@ -11,12 +11,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from db.database import init_db, close_db
 from tasks.scheduler import start_scheduler, stop_scheduler
+from load_db_config import load_exchange_config
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    start_scheduler()
+    await load_exchange_config()
+    try:
+        start_scheduler()
+    except Exception as e:
+        print(f"Scheduler start failed (non-fatal): {e}")
     yield
     stop_scheduler()
     await close_db()
@@ -61,16 +66,18 @@ async def health():
     return {"status": "ok", "exchange": settings.EXCHANGE_NAME, "testnet": settings.EXCHANGE_TESTNET}
 
 
+from api.realtime import router as realtime_router
+from api.backtest import router as backtest_router
+from api.settings import router as settings_router
+from api.exchange import router as exchange_router
+
+app.include_router(realtime_router)
+app.include_router(backtest_router)
+app.include_router(settings_router)
+app.include_router(exchange_router)
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=settings.DEBUG)
-from api.realtime import router as realtime_router
-from core.exchange import set_connected, ExchangeClient
-from config import settings
-import asyncio
-app.include_router(realtime_router)
-from api.backtest import router as backtest_router
-app.include_router(backtest_router)
-from api.exchange import router as exchange_router
-app.include_router(exchange_router)
+
 

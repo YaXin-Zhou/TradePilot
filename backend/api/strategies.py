@@ -1,5 +1,5 @@
 """策略管理 API"""
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
@@ -9,6 +9,7 @@ from strategies.runner import runner
 from strategies.custom import CustomStrategy
 from db.database import async_session
 from sqlalchemy import select
+from auth.deps import get_current_user
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/api/strategies", tags=["strategies"])
@@ -49,7 +50,7 @@ async def list_strategies():
 
 
 @router.post("/")
-async def create_strategy(req: StrategyCreate):
+async def create_strategy(req: StrategyCreate, _user: dict = Depends(get_current_user)):
     async with async_session() as session:
         strategy = Strategy(
             name=req.name,
@@ -89,7 +90,7 @@ async def get_strategy(strategy_id: str):
 
 
 @router.patch("/{strategy_id}")
-async def update_strategy(strategy_id: str, req: StrategyUpdate):
+async def update_strategy(strategy_id: str, req: StrategyUpdate, _user: dict = Depends(get_current_user)):
     async with async_session() as session:
         result = await session.execute(
             select(Strategy).where(Strategy.id == strategy_id)
@@ -106,7 +107,7 @@ async def update_strategy(strategy_id: str, req: StrategyUpdate):
 
 
 @router.post("/{strategy_id}/start")
-async def start_strategy(strategy_id: str):
+async def start_strategy(strategy_id: str, _user: dict = Depends(get_current_user)):
     async with async_session() as session:
         r = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
         s = r.scalar_one_or_none()
@@ -127,14 +128,14 @@ async def start_strategy(strategy_id: str):
 
 
 @router.post("/{strategy_id}/stop")
-async def stop_strategy(strategy_id: str):
+async def stop_strategy(strategy_id: str, _user: dict = Depends(get_current_user)):
     await runner.stop(strategy_id)
     return {"success": True}
 
 
 
 @router.delete("/{strategy_id}")
-async def delete_strategy(strategy_id: str):
+async def delete_strategy(strategy_id: str, _user: dict = Depends(get_current_user)):
     async with async_session() as session:
         result = await session.execute(
             select(Strategy).where(Strategy.id == strategy_id)
@@ -145,33 +146,5 @@ async def delete_strategy(strategy_id: str):
         await session.delete(s)
         await session.commit()
         return {"success": True}
-
-
-@router.post("/{strategy_id}/start")
-async def start_strategy(strategy_id: str):
-    async with async_session() as session:
-        r = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
-        s = r.scalar_one_or_none()
-        if not s:
-            return {"success": False, "error": "not found"}
-        if s.type == StrategyType.CUSTOM:
-            instance = CustomStrategy(s.id, s.name, s.config)
-        elif s.type == StrategyType.GRID:
-            from strategies.grid import GridStrategy
-            instance = GridStrategy(s.id, s.name, s.config)
-        else:
-            return {"success": False, "error": "unsupported type"}
-        await runner.start(strategy_id, instance)
-        s.status = StrategyStatus.RUNNING
-        s.started_at = datetime.now(timezone.utc)
-        await session.commit()
-    return {"success": True}
-
-
-@router.post("/{strategy_id}/stop")
-async def stop_strategy(strategy_id: str):
-    await runner.stop(strategy_id)
-    return {"success": True}
-
 
 

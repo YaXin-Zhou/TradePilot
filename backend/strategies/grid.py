@@ -20,8 +20,20 @@ class GridStrategy(BaseStrategy):
 
     def __init__(self, strategy_id: str, name: str, config: dict):
         super().__init__(strategy_id, name, config)
-        self.lower = float(config.get("lower_bound", 83000))
-        self.upper = float(config.get("upper_bound", 93000))
+        lower = config.get("lower_bound")
+        upper = config.get("upper_bound")
+        if lower is None or upper is None:
+            try:
+                from core.exchange import shared_exchange
+                t = shared_exchange.fetch_ticker(self.symbol)
+                p = t.get("last", 86500)
+                lower = p * 0.9
+                upper = p * 1.1
+            except Exception:
+                lower = 83000
+                upper = 93000
+        self.lower = float(lower)
+        self.upper = float(upper)
         self.grid_count = int(config.get("grid_count", 20))
         self.order_amount = float(config.get("order_amount", 100))
         self.max_investment = float(config.get("max_investment", 2000))
@@ -67,3 +79,4 @@ class GridStrategy(BaseStrategy):
                 reason=f"grid buy #{idx}",
             )
         return None
+

@@ -3,8 +3,9 @@ import Link from "next/link";
 import { useRouter } from "next/router";
 import {
   LayoutDashboard, TrendingUp, BarChart3, Settings,
-  Activity, Wallet, LineChart, Menu, X, ChevronDown, Languages
+  Activity, Wallet, LineChart, Menu, X, ChevronDown, Languages, LogIn, LogOut
 } from "lucide-react";
+import { getToken, clearToken } from "../lib/api"
 import { useLanguage } from "../lib/LanguageContext";
 
 const NAV_ITEMS = [
@@ -92,6 +93,17 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <Languages size={14} />
             {lang === "zh" ? "EN" : "中"}
           </button>
+          {getToken() ? (
+            <button onClick={() => { clearToken(); window.location.href = "/login" }}
+              className="flex items-center justify-center gap-2 w-full py-2 rounded-lg text-dark-400 hover:text-dark-200 hover:bg-dark-800 transition-all text-xs">
+              <LogOut size={14} /> {lang === "zh" ? "登出" : "Logout"}
+            </button>
+          ) : (
+            <Link href="/login"
+              className="flex items-center justify-center gap-2 w-full py-2 rounded-lg text-dark-400 hover:text-dark-200 hover:bg-dark-800 transition-all text-xs">
+              <LogIn size={14} /> {lang === "zh" ? "登录" : "Login"}
+            </Link>
+          )}
           <button
             onClick={() => setCollapsed(!collapsed)}
             className="flex items-center justify-center w-full py-2 rounded-lg text-dark-400 hover:text-dark-200 hover:bg-dark-800 transition-all"

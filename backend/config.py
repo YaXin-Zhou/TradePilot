@@ -32,8 +32,16 @@ class Settings:
     PORT: int = int(os.getenv("PORT", "8000"))
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
 
+    # 代理
+    HTTPS_PROXY: str = os.getenv("HTTPS_PROXY", "")
+    HTTP_PROXY: str = os.getenv("HTTP_PROXY", "")
+
+    # JWT
+    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "ai_quant_jwt_secret_key_dev")
+    JWT_EXPIRE_MINUTES: int = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))
+
     # CORS
-    CORS_ORIGINS: list[str] = ['*']
+    CORS_ORIGINS: list[str] = os.getenv("CORS_ORIGINS", "*").split(",")
 
     # 策略默认参数
     DEFAULT_GRID_LOWER: float = 83000.0

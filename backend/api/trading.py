@@ -2,13 +2,21 @@
 from fastapi import APIRouter, Depends
 from core.exchange import shared_exchange as _exchange
 from auth.deps import get_current_user
+from core.risk import risk_manager
 from config import settings
 from pydantic import BaseModel
+
+
+def _get_price(symbol: str) -> float:
+    try:
+        t = _exchange.fetch_ticker(symbol)
+        return t.get("last", 0) or 0
+    except Exception:
+        return 0
+
 import random, uuid
 
 router = APIRouter(prefix="/api/trading", tags=["trading"])
-
-
 
 
 class LimitOrderRequest(BaseModel):
@@ -44,6 +52,9 @@ async def get_balance(_user: dict = Depends(get_current_user)):
 
 @router.post("/limit-order")
 async def place_limit_order(req: LimitOrderRequest, _user: dict = Depends(get_current_user)):
+    ok, msg = await risk_manager.check_order(_user.get("id", "system"), req.symbol, req.side, req.amount * req.price)
+    if not ok:
+        return {"success": False, "error": msg}
     try:
         order = _exchange.create_limit_order(req.symbol, req.side, req.amount, req.price)
         return {"success": True, "data": order}
@@ -66,6 +77,9 @@ async def cancel_order(req: CancelOrderRequest, _user: dict = Depends(get_curren
 
 @router.post("/market-order")
 async def place_market_order(req: MarketOrderRequest, _user: dict = Depends(get_current_user)):
+    ok, msg = await risk_manager.check_order(_user.get("id", "system"), req.symbol, req.side, req.amount * _get_price(req.symbol))
+    if not ok:
+        return {"success": False, "error": msg}
     try:
         order = _exchange.create_market_order(req.symbol, req.side, req.amount)
         return {"success": True, "data": order}

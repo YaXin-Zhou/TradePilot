@@ -8,7 +8,7 @@ from db.database import Base
 
 
 def _utcnow():
-    return datetime.now(timezone.utc)
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _uuid():
@@ -179,3 +179,11 @@ class BacktestResult(Base):
     trades = Column(JSON, default=list)
     created_at = Column(DateTime, default=_utcnow)
 
+
+
+
+class AppConfig(Base):
+    __tablename__ = "app_config"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    key = Column(String(64), unique=True, nullable=False)
+    value = Column(Text, default="")

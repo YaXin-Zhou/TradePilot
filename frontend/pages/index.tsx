@@ -16,6 +16,7 @@ export default function Dashboard() {
   const [prediction, setPrediction] = useState<any>(null);
   const [indicators, setIndicators] = useState<any>(null);
   const [trades, setTrades] = useState<any[]>([]);
+  const [ohlcv, setOhlcv] = useState<any[]>([]);
   const { t } = useLanguage();
   useRealtime({ onTicker: setTicker });
 
@@ -24,6 +25,7 @@ export default function Dashboard() {
     api.getIndicators().then(setIndicators).catch(() => {});
     api.getPrediction().then(setPrediction).catch(() => {});
     api.getTradeHistory(20).then(setTrades).catch(() => {});
+    api.getOHLCV().then(setOhlcv).catch(() => {});
   }, [refreshKey]);
 
   const signalBadge = (signal: string) => {
@@ -56,7 +58,8 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
-          <PriceChart refreshKey={refreshKey} ticker={ticker} />
+            <PriceChart refreshKey={refreshKey} ticker={ticker} />
+            </div>
         </div>
 
         <div className="space-y-4">
@@ -176,8 +179,6 @@ export default function Dashboard() {
               </div>
             </div>
           )}
-        </div>
-      </div>
 
       {/* Recent Trades */}
       <div className="card">
@@ -227,6 +228,7 @@ export default function Dashboard() {
           </table>
         </div>
       </div>
+        </div>
     </div>
   );
 }

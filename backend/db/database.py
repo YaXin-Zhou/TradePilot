@@ -6,9 +6,10 @@ from pathlib import Path
 
 from config import settings
 
-# 确保数据目录存在
-db_path = Path(settings.DATABASE_URL.replace("sqlite+aiosqlite:///", "")).parent
-db_path.mkdir(parents=True, exist_ok=True)
+# 确保数据目录存在 (仅SQLite)
+if "sqlite" in settings.DATABASE_URL:
+    db_path = Path(settings.DATABASE_URL.replace("sqlite+aiosqlite:///", "")).parent
+    db_path.mkdir(parents=True, exist_ok=True)
 
 engine = create_async_engine(settings.DATABASE_URL, echo=settings.ECHO_SQL, pool_size=10, max_overflow=20)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -31,4 +32,5 @@ async def get_session() -> AsyncSession:
 
 async def close_db():
     await engine.dispose()
+
 

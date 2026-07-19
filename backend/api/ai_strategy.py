@@ -1,11 +1,12 @@
 """AI Strategy API"""
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from strategies.backtest import BacktestEngine
 from strategies.ai_strategy import AIStrategyEngine
 from core.exchange import shared_exchange as _exchange
 from ml.features import FeatureEngine
+from auth.deps import get_current_user
 from config import settings
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
@@ -25,7 +26,7 @@ class AnalyzeRequest(BaseModel):
 
 
 @router.post("/analyze")
-async def ai_analyze(req: AnalyzeRequest):
+async def ai_analyze(req: AnalyzeRequest, _user: dict = Depends(get_current_user)):
     try:
         ticker = _exchange.fetch_ticker(req.symbol)
         df = _exchange.fetch_ohlcv(req.symbol, req.timeframe, limit=100)
@@ -110,3 +111,5 @@ async def test_connection(data: dict):
             return {"success": False, "error": f"API returned {resp.status_code}"}
     except Exception as e:
         return {"success": False, "error": str(e)[:100]}
+
+

@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLanguage } from "../lib/LanguageContext";
-import { Save, Key, Database, Shield } from "lucide-react";
+import { api } from "../lib/api";
+import { Save, Key, Database, Shield, RefreshCw } from "lucide-react";
 
 export default function SettingsPage() {
   const [apiKey, setApiKey] = useState("");
@@ -8,12 +9,39 @@ export default function SettingsPage() {
   const [passphrase, setPassphrase] = useState("");
   const [testnet, setTestnet] = useState(true);
   const [saved, setSaved] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [testResult, setTestResult] = useState<null | { ok: boolean; msg: string }>(null);
   const { t } = useLanguage();
 
-  const saveSettings = () => {
-    localStorage.setItem("quant_trade_settings", JSON.stringify({ apiKey, secret, passphrase, testnet }));
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  useEffect(() => {
+    api.getExchangeSettings().then((data: any) => {
+      if (data?.api_key) setApiKey(data.api_key);
+      if (data?.has_secret) setSecret("***");
+      if (data?.has_passphrase) setPassphrase("***");
+      if (typeof data?.testnet === "boolean") setTestnet(data.testnet);
+    }).catch(() => {});
+  }, []);
+
+  const saveSettings = async () => {
+    setLoading(true);
+    try {
+      await api.saveExchangeSettings({ api_key: apiKey, secret, passphrase, testnet });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e: any) {
+      console.error("Save failed", e);
+    }
+    setLoading(false);
+  };
+
+  const testConnection = async () => {
+    setTestResult(null);
+    try {
+      const res = await api.testConnection({ api_key: apiKey, secret, passphrase, testnet });
+      setTestResult({ ok: true, msg: "Connected! Latency: " + res.latency_ms + "ms" });
+    } catch (e: any) {
+      setTestResult({ ok: false, msg: e.message || "Connection failed" });
+    }
   };
 
   return (
@@ -33,7 +61,19 @@ export default function SettingsPage() {
             </button>
             <span className="text-xs text-dark-400">{testnet ? t("settings.sandbox") : t("settings.live")}</span>
           </div>
-          <button onClick={saveSettings} className="btn-primary flex items-center gap-2 text-sm"><Save size={16} /> {saved ? t("settings.saved") : t("settings.save")}</button>
+          <div className="flex gap-3">
+            <button onClick={saveSettings} disabled={loading} className="btn-primary flex items-center gap-2 text-sm">
+              <Save size={16} /> {loading ? "Saving..." : saved ? t("settings.saved") : t("settings.save")}
+            </button>
+            <button onClick={testConnection} className="btn-ghost flex items-center gap-2 text-sm">
+              <RefreshCw size={16} /> Test Connection
+            </button>
+          </div>
+          {testResult && (
+            <div className={`text-xs p-2 rounded ${testResult.ok ? "bg-okx-green/10 text-okx-green" : "bg-okx-red/10 text-okx-red"}`}>
+              {testResult.msg}
+            </div>
+          )}
         </div>
       </div>
 

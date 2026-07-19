@@ -9,17 +9,22 @@ async function getToast() {
   return _toast?.toast;
 }
 
-async function request(path: string, options?: RequestInit) {
+async function request(path: string, options?: RequestInit, timeoutMs: number = 8000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const mergedOpts = { ...options, signal: options?.signal || controller.signal };
   const url = `${API_BASE}${path}`;
   const headers: any = { "Content-Type": "application/json", ...options?.headers };
   const token = getToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(url, { headers, ...options });
+  const res = await fetch(url, { headers, ...mergedOpts });
+  clearTimeout(timeoutId);
   if (res.status === 401) {
     clearToken();
     if (typeof window !== "undefined") window.location.href = "/login";
     throw new Error("Unauthorized");
   }
+  clearTimeout(timeoutId);
   const json = await res.json();
   if (!json.success) {
     const msg = json.error || "Request failed";
@@ -126,10 +131,15 @@ export const api = {
     request("/api/backtest/data", { method: "POST", body: JSON.stringify(data) }),
   getBacktestHistory: () => request("/api/backtest/history"),
   clearBacktestHistory: () => request("/api/backtest/history/clear", { method: "POST" }),
-  // Exchange
-  getExchangeStatus: () => request("/api/exchange/status"),
+  // Settings
+  getExchangeSettings: () => request("/api/settings/exchange"),
+  saveExchangeSettings: (data: { api_key: string; secret: string; passphrase: string; testnet: boolean }) =>
+    request("/api/settings/exchange", { method: "POST", body: JSON.stringify(data) }),
   testConnection: (data: { api_key?: string; secret?: string; passphrase?: string; testnet?: boolean }) =>
     request("/api/exchange/test-connection", { method: "POST", body: JSON.stringify(data) }),
+
+  // Exchange
+  getExchangeStatus: () => request("/api/exchange/status"),
   // Auth
   login: (username: string, password: string) =>
     request("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
