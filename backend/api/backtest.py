@@ -1,5 +1,8 @@
-"""回测 API"""
-from fastapi import APIRouter
+"""回测 API — v1.3 U5: +异步回测（后台任务+WebSocket进度推送）"""
+import asyncio
+import uuid
+import time
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from services.backtest_service import (
     fetch_ohlcv, run_backtest, save_to_history, get_history, clear_history,
     get_total_attempts, reset_attempts,
@@ -83,6 +86,123 @@ async def api_backtest_stats():
             "total_attempts": get_total_attempts(),
             "total_records": total,
             "scientific_passed": scientific_passed,
-            "pass_rate": round(scientific_passed / total * 100, 1) if total > 0 else 0,
-        },
+                "pass_rate": round(scientific_passed / total * 100, 1) if total > 0 else 0,
+            },
+        }
+
+
+# ──── v1.3 U5: 异步回测 ────
+
+# 内存任务存储（生产可迁 Redis）
+_async_tasks: dict[str, dict] = {}
+
+
+async def _run_backtest_bg(task_id: str, body: dict):
+    """后台执行回测，更新进度并推送 WebSocket"""
+    task = _async_tasks.get(task_id)
+    if not task:
+        return
+
+    task["status"] = "running"
+
+    def _progress(stage: str, pct: int):
+        task["progress"] = pct
+        task["stage"] = stage
+
+    try:
+        _progress("Fetching data", 10)
+        ohlcv_df, is_mock = fetch_ohlcv(
+            body.get("symbol", "BTC/USDT"),
+            body.get("timeframe", "1h"),
+            body.get("limit", 500),
+        )
+        if ohlcv_df is None or len(ohlcv_df) < 30:
+            task["status"] = "error"
+            task["error"] = f"Not enough data ({len(ohlcv_df) if ohlcv_df is not None else 0} bars)"
+            return
+
+        _progress("IS/OOS split", 25)
+        _progress("IS backtest", 50)
+        result = run_backtest(
+            ohlcv_df,
+            body.get("strategy", "ma_crossover"),
+            float(body.get("capital", 10000)),
+            body.get("params", {}),
+        )
+
+        _progress("OOS backtest", 70)
+        _progress("PBO calculation", 90)
+
+        save_to_history(
+            body.get("strategy", "ma_crossover"),
+            body.get("symbol", "BTC/USDT"),
+            body.get("timeframe", "1h"),
+            float(body.get("capital", 10000)),
+            body.get("params", {}),
+            result,
+        )
+
+        _progress("Complete", 100)
+        task["status"] = "done"
+        task["result"] = {"success": True, "data": result}
+        if is_mock:
+            task["result"]["_mock"] = True
+
+    except Exception as e:
+        task["status"] = "error"
+        task["error"] = str(e)
+
+
+@router.post("/async")
+async def api_run_backtest_async(body: dict):
+    """v1.3 U5: 异步回测 — POST 立即返回 task_id，后台执行"""
+    task_id = f"bt_{uuid.uuid4().hex[:12]}"
+    _async_tasks[task_id] = {
+        "task_id": task_id,
+        "status": "pending",
+        "progress": 0,
+        "stage": "Queued",
+        "created_at": time.time(),
+        "result": None,
+        "error": None,
     }
+    asyncio.create_task(_run_backtest_bg(task_id, body))
+    return {"success": True, "task_id": task_id, "status": "pending"}
+
+
+@router.get("/async/{task_id}")
+async def api_backtest_status(task_id: str):
+    """v1.3 U5: 查询异步回测状态/结果"""
+    task = _async_tasks.get(task_id)
+    if not task:
+        return {"success": False, "error": "Task not found"}
+    return {"success": True, "data": task}
+
+
+@router.websocket("/ws/{task_id}")
+async def ws_backtest_progress(websocket: WebSocket, task_id: str):
+    """v1.3 U5: WebSocket 回测进度推送"""
+    await websocket.accept()
+    try:
+        while True:
+            task = _async_tasks.get(task_id)
+            if not task:
+                await websocket.send_json({"error": "Task not found"})
+                break
+
+            await websocket.send_json({
+                "progress": task["progress"],
+                "stage": task["stage"],
+                "status": task["status"],
+            })
+
+            if task["status"] in ("done", "error"):
+                if task["status"] == "done":
+                    await websocket.send_json(task["result"])
+                else:
+                    await websocket.send_json({"error": task.get("error", "Unknown")})
+                break
+
+            await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        pass
