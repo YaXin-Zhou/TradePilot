@@ -147,6 +147,7 @@ services:
       - "9090:9090"
     volumes:
       - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus/rules.yml:/etc/prometheus/rules.yml:ro  # v1.2: 告警规则
       - prometheus_data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
@@ -181,6 +182,27 @@ services:
         max-size: "20m"
         max-file: "3"
 
+  # v1.2: Alertmanager 告警接收与路由
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    container_name: ai_quant_alertmanager
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./deploy/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   # v1.2: Certbot 用于 SSL 证书签发（按需运行，非常驻）
   certbot:
     image: certbot/certbot:latest
@@ -197,3 +219,4 @@ volumes:
   grafana_data:
   certbot_certs:
   certbot_www:
+  alertmanager_data:

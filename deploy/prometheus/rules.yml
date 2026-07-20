@@ -1,0 +1,59 @@
+# v1.2: Prometheus 告警规则
+groups:
+  - name: trading_critical
+    rules:
+      - alert: KillSwitchTriggered
+        expr: kill_switch_status == 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "紧急停止已触发"
+          description: "Kill switch 状态为 TRIGGERED，所有交易已暂停。需要手动 POST /api/trading/emergency-reset 恢复。"
+
+      - alert: BackendDown
+        expr: up{job="ai_quant_backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "后端服务不可达"
+          description: "Prometheus 无法 scrape 后端指标端点，可能服务已崩溃。"
+
+      - alert: HighExecutionErrorRate
+        expr: rate(trade_execution_errors_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "交易执行错误率 > 10%/分钟"
+          description: "过去 5 分钟交易执行错误率过高，请检查交易所连接和 API Key。"
+
+  - name: trading_warning
+    rules:
+      - alert: CompensationQueueBacklog
+        expr: pending_compensation_queue_size > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "订单补偿队列积压 > 50"
+          description: "DB 写入失败队列积压，可能存在数据库连接问题。"
+
+      - alert: HighDBPoolUsage
+        expr: db_pool_checked_out / db_pool_size > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "数据库连接池使用率 > 80%"
+          description: "数据库连接池接近耗尽，可能影响性能。考虑增加连接池大小或检查慢查询。"
+
+      - alert: NoActiveStrategies
+        expr: active_strategies == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "无活跃策略运行"
+          description: "超过 15 分钟没有策略在运行，可能所有策略已异常退出。"

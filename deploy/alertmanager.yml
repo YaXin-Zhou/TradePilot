@@ -1,0 +1,49 @@
+# v1.2: Alertmanager 配置
+# 当前阶段：日志输出（无外部通知渠道依赖）
+# 生产启用时取消注释对应 receiver 并修改 webhook URL
+
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ["alertname", "severity"]
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1h
+  receiver: "log-output"
+
+  routes:
+    - match:
+        severity: critical
+      receiver: "log-output"
+      repeat_interval: 15m
+
+receivers:
+  - name: "log-output"
+    # 默认输出到 Alertmanager 日志（适合开发/测试）
+    # 生产环境可替换为企业微信 Webhook / Slack / Email
+
+  # 企业微信 Webhook 示例（取消注释并填写 webhook URL）:
+  # - name: "wechat-work"
+  #   wechat_configs:
+  #     - corp_id: "YOUR_CORP_ID"
+  #       api_secret: "YOUR_API_SECRET"
+  #       to_user: "@all"
+  #       agent_id: "YOUR_AGENT_ID"
+  #       message_type: "markdown"
+
+  # 邮件示例:
+  # - name: "email-admin"
+  #   email_configs:
+  #     - to: "admin@example.com"
+  #       from: "alert@example.com"
+  #       smarthost: "smtp.example.com:587"
+  #       auth_username: "alert@example.com"
+  #       auth_password: "YOUR_PASSWORD"
+
+inhibit_rules:
+  - source_match:
+      severity: "critical"
+    target_match:
+      severity: "warning"
+    equal: ["alertname"]
