@@ -1,15 +1,11 @@
-"""N5: 运行指标端点 + 详细健康检查
+"""N5 + v1.2: 运行指标端点 + 详细健康检查 + Prometheus 导出
 
-/api/metrics  — JSON 运行指标（不依赖 Prometheus）
-/api/healthz  — 标准命名健康检查（DB/Redis/Exchange 探测）
-
-设计原则：
-  - 不返回订单 ID / 价格等敏感字段（仅聚合指标）
-  - 轻量级，不依赖外部监控系统
-  - 兼容现有 /api/health 和 /api/health/deep（不替换）
+/api/metrics            — JSON 运行指标
+/api/metrics/prometheus — Prometheus scrape endpoint
+/api/healthz            — 标准命名健康检查（DB/Redis/Exchange 探测）
 """
 import time as _time
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 
 from config import settings
 from db.database import async_session
@@ -79,7 +75,50 @@ async def get_metrics():
     except Exception:
         pass
 
+    # v1.2: 同步到 Prometheus Gauge
+    _sync_prometheus(metrics)
+
     return metrics
+
+
+def _sync_prometheus(metrics: dict):
+    """将 JSON 指标同步到 Prometheus Gauge"""
+    try:
+        from core.metrics import (
+            kill_switch_status as _ks_gauge,
+            active_strategies as _as_gauge,
+            pending_compensation_queue_size as _pq_gauge,
+            tick_cache_size as _tc_gauge,
+            app_uptime_seconds as _up_gauge,
+            backend_up as _be_gauge,
+        )
+        _ks_gauge.set(1 if metrics.get("kill_switch_active") else 0)
+        _as_gauge.set(metrics.get("active_strategies", 0))
+        _pq_gauge.set(max(0, metrics.get("pending_order_records", 0)))
+        _tc_gauge.set(metrics.get("tick_cache_size", 0))
+        _up_gauge.set(metrics.get("uptime_seconds", 0))
+        _be_gauge.set(1)
+    except Exception:
+        pass
+
+
+@router.get("/api/metrics/prometheus")
+async def get_prometheus_metrics():
+    """v1.2: Prometheus scrape 目标端点
+
+    返回 Prometheus 标准文本格式指标。
+    用法：在 prometheus.yml 中配置 scrape target 为 /api/metrics/prometheus
+    """
+    try:
+        from core.metrics import get_prometheus_metrics
+        data = get_prometheus_metrics()
+        return Response(content=data, media_type="text/plain; version=0.0.4")
+    except ImportError:
+        return Response(
+            content=b"# prometheus_client not installed\n",
+            status_code=500,
+            media_type="text/plain",
+        )
 
 
 @router.get("/api/healthz")

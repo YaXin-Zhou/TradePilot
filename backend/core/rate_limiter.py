@@ -1,18 +1,66 @@
-"""轻量级速率限制中间件 — 基于令牌桶算法，内存存储"""
+"""速率限制中间件 — v1.2 Redis 后端 + 内存降级
+
+Redis 可用时：多 worker 共享计数器（真实限流）
+Redis 不可用时：自动降级为内存模式（单 worker 有效，log.warning）
+"""
+
 import time
 import asyncio
 from collections import defaultdict
 from fastapi import Request, HTTPException, status
+from core.logger import log
 
 
 class RateLimiter:
-    """简单令牌桶限流器"""
+    """令牌桶限流器 — Redis 优先 + 内存降级"""
 
     def __init__(self, requests_per_minute: int = 200, burst: int = 50):
         self.rpm = requests_per_minute
         self.burst = burst
-        self._buckets: dict[str, tuple[float, int]] = {}  # key -> (last_refill_time, tokens)
+        # 内存降级
+        self._buckets: dict[str, tuple[float, int]] = {}
         self._lock = asyncio.Lock()
+        self._redis_checked = False
+        self._redis_available = False
+
+    async def _get_redis(self):
+        if not self._redis_checked:
+            from core.redis import get_redis
+
+            self._redis_available = (await get_redis()) is not None
+            self._redis_checked = True
+            if not self._redis_available:
+                log.warning(
+                    "Rate limiter: Redis unavailable — using in-memory fallback "
+                    "(limits are per-worker, not global)"
+                )
+        if not self._redis_available:
+            return None
+        from core.redis import get_redis
+
+        return await get_redis()
+
+    # ──── Redis 实现（滑动窗口）────
+
+    async def _check_redis(self, key: str, limit: int) -> bool:
+        r = await self._get_redis()
+        if r is None:
+            return await self._check_memory(key, limit)
+
+        now_ms = int(time.time() * 1000)
+        window_ms = 60_000  # 1 分钟窗口
+        redis_key = f"rate_limit:{key}:{now_ms // window_ms}"
+
+        try:
+            count = await r.incr(redis_key)
+            if count == 1:
+                await r.expire(redis_key, 120)  # 2 分钟 TTL（跨窗口边界容错）
+            return count <= limit
+        except Exception as e:
+            log.error(f"Redis rate check failed: {e}, falling back to memory")
+            return await self._check_memory(key, limit)
+
+    # ──── 内存实现（令牌桶，开发用）────
 
     async def _get_bucket(self, key: str) -> tuple[float, int]:
         async with self._lock:
@@ -22,13 +70,11 @@ class RateLimiter:
         async with self._lock:
             self._buckets[key] = (last_refill, tokens)
 
-    async def check(self, key: str, limit: int | None = None) -> bool:
-        """检查是否允许请求。返回 True=允许，False=限流"""
+    async def _check_memory(self, key: str, limit: int) -> bool:
         rpm = limit or self.rpm
         now = time.monotonic()
         last_refill, tokens = await self._get_bucket(key)
 
-        # 令牌桶补充：每秒补充 rpm/60 个令牌
         elapsed = now - last_refill
         refill = elapsed * (rpm / 60.0)
         tokens = min(self.burst, tokens + refill)
@@ -38,6 +84,13 @@ class RateLimiter:
             await self._set_bucket(key, now, tokens)
             return True
         return False
+
+    # ──── 统一入口 ────
+
+    async def check(self, key: str, limit: int | None = None) -> bool:
+        """检查是否允许请求。返回 True=允许，False=限流"""
+        effective_limit = limit or self.rpm
+        return await self._check_redis(key, effective_limit)
 
 
 # 全局限流器实例

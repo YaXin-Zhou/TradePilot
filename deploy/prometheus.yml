@@ -1,0 +1,26 @@
+# Prometheus 配置 — v1.2
+# 抓取 ai_quant_backend 的 /api/metrics/prometheus 端点
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+rule_files: []
+
+scrape_configs:
+  - job_name: "ai_quant_backend"
+    metrics_path: /api/metrics/prometheus
+    static_configs:
+      - targets: ["backend:8000"]
+        labels:
+          service: "ai_quant_trade"
+          env: "production"
+
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]

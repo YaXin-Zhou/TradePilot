@@ -32,6 +32,9 @@ class Settings:
     PORT: int = int(os.getenv("PORT", "8000"))
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
 
+    # Redis（v1.2: rate_limiter + 缓存）
+    REDIS_URL: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
+
     # 代理
     HTTPS_PROXY: str = os.getenv("HTTPS_PROXY", "")
     HTTP_PROXY: str = os.getenv("HTTP_PROXY", "")

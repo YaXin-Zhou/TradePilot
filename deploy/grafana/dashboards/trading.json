@@ -1,0 +1,76 @@
+{
+  "title": "AI Quant Trade - Trading Dashboard",
+  "uid": "ai_quant_trade_v1",
+  "panels": [
+    {
+      "title": "System Status",
+      "type": "stat",
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 3},
+      "targets": [
+        {"expr": "backend_up", "legendFormat": "Backend"},
+        {"expr": "kill_switch_status", "legendFormat": "Kill Switch"}
+      ]
+    },
+    {
+      "title": "Active Strategies",
+      "type": "stat",
+      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 3},
+      "targets": [
+        {"expr": "active_strategies", "legendFormat": "Strategies"}
+      ]
+    },
+    {
+      "title": "Uptime",
+      "type": "stat",
+      "gridPos": {"x": 12, "y": 0, "w": 6, "h": 3},
+      "targets": [
+        {"expr": "app_uptime_seconds", "legendFormat": "Seconds"}
+      ]
+    },
+    {
+      "title": "Compensation Queue",
+      "type": "stat",
+      "gridPos": {"x": 18, "y": 0, "w": 6, "h": 3},
+      "targets": [
+        {"expr": "pending_compensation_queue_size", "legendFormat": "Queue"}
+      ]
+    },
+    {
+      "title": "Order Volume",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 3, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "rate(trade_orders_total[5m])", "legendFormat": "{{side}}/{{status}}"}
+      ]
+    },
+    {
+      "title": "Execution Errors",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 3, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "rate(trade_execution_errors_total[5m])", "legendFormat": "Errors/min"}
+      ]
+    },
+    {
+      "title": "HTTP Latency",
+      "type": "heatmap",
+      "gridPos": {"x": 0, "y": 11, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "rate(http_request_duration_seconds_bucket[5m])", "legendFormat": "{{le}}"}
+      ]
+    },
+    {
+      "title": "Cache & Pool",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 11, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "tick_cache_size", "legendFormat": "Tick Cache"},
+        {"expr": "db_pool_checked_out", "legendFormat": "DB Pool Used"}
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "timepicker": {},
+  "timezone": "browser",
+  "refresh": "30s"
+}

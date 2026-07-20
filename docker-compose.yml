@@ -134,5 +134,53 @@ services:
         max-size: "30m"
         max-file: "5"
 
+  # v1.2: Prometheus 指标采集
+  prometheus:
+    image: prom/prometheus:v3.4.0
+    container_name: ai_quant_prometheus
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  # v1.2: Grafana 可视化仪表板
+  grafana:
+    image: grafana/grafana:11.8.0
+    container_name: ai_quant_grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    ports:
+      - "3030:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=""
+    volumes:
+      - ./deploy/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./deploy/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
 volumes:
   pgdata:
+  prometheus_data:
+  grafana_data:
