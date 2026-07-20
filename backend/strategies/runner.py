@@ -86,7 +86,9 @@ class StrategyRunner:
         self._positions_usdt: Dict[str, float] = {}   # sid → 已分配资金 (USDT)
         self._positions_qty: Dict[str, float] = {}    # sid → 持仓数量 (币)
         self._state_loaded = False
-        self._persist_fail_count: Dict[str, int] = {}  # P1-2: 持久化失败计数（连续失败告警）
+        self._persist_fail_count: Dict[str, int] = {}  # P1-2: 持久化失败计数
+        # v1.3 U4: 多交易对支持
+        self._symbol_map: Dict[str, str] = {}  # strategy_id → symbol
 
     # ------------------------------------------------------------------
     # M4: 状态持久化（DB 替代 JSON）
@@ -301,9 +303,12 @@ class StrategyRunner:
     # 生命周期
     # ------------------------------------------------------------------
 
-    async def start(self, strategy_id: str, strategy_obj):
+    async def start(self, strategy_id: str, strategy_obj, symbol: str = ""):
         if strategy_id in self._tasks:
             return
+        # v1.3 U4: 记录 symbol 映射
+        if symbol:
+            self._symbol_map[strategy_id] = symbol
         if kill_switch.is_triggered:
             log.warning(f"StrategyRunner[{strategy_id}]: KILL SWITCH triggered, refuse to start")
             return
@@ -645,6 +650,7 @@ class StrategyRunner:
             "positions_qty": dict(self._positions_qty),
             "running_strategies": list(self._tasks.keys()),
             "instance_id": INSTANCE_ID,
+            "active_symbols": list(set(self._symbol_map.values())),  # U4
         }
 
 
