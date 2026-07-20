@@ -38,16 +38,60 @@ async def init_db():
     from db.models import User, Strategy, Order, Trade, Position, MarketData, MLPrediction
     from db.models import AuditLog, ExchangeCredential, RunnerState  # M1: 新增三张表
     from db.models import KillSwitchStateRecord, RiskPolicyRecord     # P0-1: JSON 迁 DB
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        # M1: 迁移已有 orders 表 — 添加 account_id / idempotency_key / raw 字段
-        await conn.run_sync(_migrate_orders_table)
 
-    # P0-2: PostgreSQL 枚举补值（必须在事务外运行，ALTER TYPE ADD VALUE 在 PG<12 不支持事务）
-    await _migrate_strategytype_enum()
+    # N4: 优先尝试 Alembic 迁移（生产推荐方式）
+    alembic_ok = await _try_alembic_upgrade()
+
+    if not alembic_ok:
+        # 回退方案：create_all + 运行时 ALTER（开发模式兜底）
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            # M1: 迁移已有 orders 表 — 添加 account_id / idempotency_key / raw 字段
+            await conn.run_sync(_migrate_orders_table)
+
+        # P0-2: PostgreSQL 枚举补值（必须在事务外运行，ALTER TYPE ADD VALUE 在 PG<12 不支持事务）
+        await _migrate_strategytype_enum()
 
     # P0-1: 从 JSON 文件迁移旧数据到 DB（一次性）
     await _migrate_json_to_db()
+
+
+async def _try_alembic_upgrade() -> bool:
+    """N4: 尝试运行 alembic upgrade head
+
+    成功返回 True，失败（alembic 未安装/迁移出错）返回 False 由调用方回退。
+    生产部署推荐：先 `alembic upgrade head` 再启动 uvicorn，本函数作为兜底。
+    """
+    try:
+        from alembic.config import Config
+        from alembic import command
+        from pathlib import Path
+        import sys
+
+        # alembic.ini 在 backend/ 目录
+        backend_dir = Path(__file__).parent.parent
+        alembic_ini = backend_dir / "alembic.ini"
+        if not alembic_ini.exists():
+            return False
+
+        # 确保 backend 在 sys.path（env.py 需要 import config/db）
+        if str(backend_dir) not in sys.path:
+            sys.path.insert(0, str(backend_dir))
+
+        alembic_cfg = Config(str(alembic_ini))
+        command.upgrade(alembic_cfg, "head")
+        return True
+    except ImportError:
+        # alembic 未安装
+        return False
+    except Exception as e:
+        # 迁移出错（已有表/枚举冲突/连接失败等）
+        try:
+            from core.logger import log
+            log.warning(f"Alembic upgrade failed, falling back to create_all: {e}")
+        except ImportError:
+            print(f"[init_db] Alembic upgrade failed, falling back to create_all: {e}")
+        return False
 
 
 def _migrate_orders_table(conn):

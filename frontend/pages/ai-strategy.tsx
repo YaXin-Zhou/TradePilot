@@ -2,18 +2,22 @@ import { useState, useEffect } from "react";
 import { api } from "../lib/api";
 import { useLanguage } from "../lib/LanguageContext";
 import { Brain, Send, Zap, RefreshCw, TrendingUp, TrendingDown, Minus, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import type { AiAnalyzeResult, AiAnalyzeRequest } from "../types/strategy";
+import type { Ticker, Balance, PlaceOrderResult } from "../types/portfolio";
+import type { ApiError } from "../types/api";
+import { asApiError } from "../types/api";
 
 
 export default function AIStrategyPage() {
   const [strategy, setStrategy] = useState("");
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<any>(null);
-  const [ticker, setTicker] = useState<any>(null);
+  const [result, setResult] = useState<AiAnalyzeResult | null>(null);
+  const [ticker, setTicker] = useState<Ticker | null>(null);
   const [connected, setConnected] = useState<boolean | null>(null);
-  const [balance, setBalance] = useState<any>(null);
+  const [balance, setBalance] = useState<Balance | null>(null);
   const [orderAmount, setOrderAmount] = useState(100);
   const [placingOrder, setPlacingOrder] = useState(false);
-  const [placedOrder, setPlacedOrder] = useState<any>(null);
+  const [placedOrder, setPlacedOrder] = useState<PlaceOrderResult | null>(null);
 
   useEffect(() => {
     api.getTicker().then(setTicker).catch(() => {});
@@ -26,10 +30,11 @@ export default function AIStrategyPage() {
     setLoading(true);
     setResult(null);
     try {
-      const res = await api.aiAnalyze({ strategy_desc: strategy, auto: false } as any);
+      const req: AiAnalyzeRequest = { strategy_desc: strategy, auto: false };
+      const res = await api.aiAnalyze(req);
       setResult(res);
-    } catch (e: any) {
-      setResult({ error: e.message });
+    } catch (e: unknown) {
+      setResult({ error: asApiError(e).message });
     }
     setLoading(false);
   };
@@ -41,8 +46,8 @@ export default function AIStrategyPage() {
     try {
       const res = await api.placeMarketOrder({ side, amount: orderAmount });
       setPlacedOrder(res);
-    } catch (e: any) {
-      setPlacedOrder({ error: e.message });
+    } catch (e: unknown) {
+      setPlacedOrder({ id: "", symbol: "", side: "buy", amount: 0, status: "error", timestamp: 0, error: asApiError(e).message });
     }
     setPlacingOrder(false);
   };
@@ -51,10 +56,11 @@ export default function AIStrategyPage() {
     setLoading(true);
     setResult(null);
     try {
-      const res = await api.aiAnalyze({ strategy_desc: "", auto: true } as any);
+      const req: AiAnalyzeRequest = { strategy_desc: "", auto: true };
+      const res = await api.aiAnalyze(req);
       setResult(res);
-    } catch (e: any) {
-      setResult({ error: e.message });
+    } catch (e: unknown) {
+      setResult({ error: asApiError(e).message });
     }
     setLoading(false);
   };
@@ -101,7 +107,7 @@ export default function AIStrategyPage() {
               <span className="text-sm font-semibold text-white mb-3 block">Current Market</span>
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div><span className="text-dark-400">Price</span><p className="font-mono text-white">${ticker.last?.toFixed(2)}</p></div>
-                <div><span className="text-dark-400">24h</span><p className={"font-mono " + (ticker.change_pct >= 0 ? "text-green" : "text-red")}>{ticker.change_pct?.toFixed(2)}%</p></div>
+                <div><span className="text-dark-400">24h</span><p className={"font-mono " + ((ticker.change_pct ?? 0) >= 0 ? "text-green" : "text-red")}>{ticker.change_pct?.toFixed(2)}%</p></div>
                 <div><span className="text-dark-400">High/Low</span><p className="font-mono text-dark-200">${ticker.high?.toFixed(0)} / ${ticker.low?.toFixed(0)}</p></div>
               </div>
             </div>
@@ -119,9 +125,9 @@ export default function AIStrategyPage() {
             <div className="card border-indigo-500/20">
               <div className="flex items-center justify-between mb-4">
                 <span className="text-sm font-semibold text-white">AI Signal</span>
-                <SignalBadge signal={result.signal} />
+                {result.signal && <SignalBadge signal={result.signal} />}
               </div>
-              {result.confidence && (
+              {result.confidence != null && (
                 <div className="mb-3">
                   <div className="flex justify-between text-xs mb-1">
                     <span className="text-dark-400">Confidence</span>
@@ -140,7 +146,7 @@ export default function AIStrategyPage() {
                 <div className="mt-3 pt-3 border-t border-dark-800">
                   <span className="text-xs font-semibold text-white mb-2 block">Indicators</span>
                   <div className="grid grid-cols-2 gap-1 text-xs">
-                    {Object.entries(result.indicators).map(([k, v]: [string, any]) => (
+                    {Object.entries(result.indicators).map(([k, v]: [string, number | string]) => (
                       <div key={k} className="flex justify-between py-0.5">
                         <span className="text-dark-400">{k.toUpperCase()}</span>
                         <span className="font-mono text-dark-200">{typeof v === "number" ? v.toFixed(2) : String(v)}</span>
@@ -151,7 +157,7 @@ export default function AIStrategyPage() {
               )}
             </div>
           )}
-          {result && (result.signal === "buy" || result.signal === "strong_buy" || result.signal === "sell" || result.signal === "strong_sell") && (
+          {result && result.signal && (result.signal === "buy" || result.signal === "strong_buy" || result.signal === "sell" || result.signal === "strong_sell") && (
             <div className="mt-4 pt-4 border-t border-dark-800">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-semibold text-white">Execute Trade</span>
@@ -168,7 +174,7 @@ export default function AIStrategyPage() {
                     onChange={e => setOrderAmount(Number(e.target.value))}
                     className="w-full text-sm py-1.5 px-2 rounded border border-dark-800 bg-dark-900 text-dark-200" />
                 </div>
-                <button onClick={() => placeOrder(result.signal)}
+                <button onClick={() => placeOrder(result.signal || "")}
                   disabled={placingOrder}
                   className="w-full flex items-center justify-center gap-2 text-sm py-2.5 rounded font-semibold"
                   style={{
@@ -196,7 +202,7 @@ export default function AIStrategyPage() {
                   <div className="mt-3 pt-3 border-t border-dark-800">
                     <span className="text-xs font-semibold text-white mb-2 block">Backtest Result</span>
                     <div className="grid grid-cols-2 gap-1 text-xs">
-                      <div className="flex justify-between py-0.5"><span className="text-dark-400">Return</span><span className={"font-mono " + (result.backtest.total_return_pct >= 0 ? "text-okx-green" : "text-okx-red")}>{result.backtest.total_return_pct?.toFixed(2)}%</span></div>
+                      <div className="flex justify-between py-0.5"><span className="text-dark-400">Return</span><span className={"font-mono " + ((result.backtest.total_return_pct ?? 0) >= 0 ? "text-okx-green" : "text-okx-red")}>{result.backtest.total_return_pct?.toFixed(2)}%</span></div>
                       <div className="flex justify-between py-0.5"><span className="text-dark-400">Sharpe</span><span className="font-mono text-dark-200">{result.backtest.sharpe_ratio?.toFixed(2)}</span></div>
                       <div className="flex justify-between py-0.5"><span className="text-dark-400">Max DD</span><span className="font-mono text-okx-red">{result.backtest.max_drawdown_pct?.toFixed(2)}%</span></div>
                       <div className="flex justify-between py-0.5"><span className="text-dark-400">Win Rate</span><span className="font-mono text-okx-blue">{result.backtest.win_rate?.toFixed(0)}%</span></div>

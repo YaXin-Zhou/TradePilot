@@ -132,6 +132,28 @@ class Settings:
         if self.ENCRYPTION_KEY == "" and not self.DEBUG:
             warnings.append("ENCRYPTION_KEY 未设置（生产建议显式配置）")
 
+        # N3: 检测 <CHANGE_ME> 占位符（防 .env.example 复制后漏改）
+        placeholders: list[str] = []
+        if self.EXCHANGE_API_KEY == "<CHANGE_ME>":
+            placeholders.append("EXCHANGE_API_KEY")
+        if self.EXCHANGE_SECRET == "<CHANGE_ME>":
+            placeholders.append("EXCHANGE_SECRET")
+        if self.EXCHANGE_PASSPHRASE == "<CHANGE_ME>":
+            placeholders.append("EXCHANGE_PASSPHRASE")
+        if self.ENCRYPTION_KEY == "<CHANGE_ME>":
+            placeholders.append("ENCRYPTION_KEY")
+        if self.JWT_SECRET_KEY == "<CHANGE_ME>":
+            placeholders.append("JWT_SECRET_KEY")
+        if placeholders:
+            msg = (
+                f"FATAL: 以下密钥仍为 <CHANGE_ME> 占位符: {placeholders}。"
+                f"请编辑 .env 替换为真实值（参考 .env.example 的生成命令）。"
+            )
+            if not self.DEBUG:
+                raise RuntimeError(msg)
+            else:
+                warnings.append(msg)
+
         return warnings
 
 

@@ -107,6 +107,7 @@ from api.portfolio import router as portfolio_router
 from api.strategies import router as strategies_router
 from api.analysis import router as analysis_router
 from api.ai_strategy import router as ai_router
+from api.metrics import router as metrics_router  # N5: /api/metrics + /api/healthz
 
 app.include_router(market_router)
 app.include_router(trading_router)
@@ -114,6 +115,7 @@ app.include_router(portfolio_router)
 app.include_router(strategies_router)
 app.include_router(analysis_router)
 app.include_router(ai_router)
+app.include_router(metrics_router)  # N5: /api/metrics + /api/healthz
 from auth.router import router as auth_router
 app.include_router(auth_router)
 

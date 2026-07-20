@@ -1,5 +1,5 @@
 # AI Quant Trade — Frontend Dockerfile
-# M5: 统一 Node 22 + 生产优化
+# M5 + N6 修复：output:'export' 静态导出 + nginx 提供静态文件
 FROM node:22-alpine AS builder
 
 WORKDIR /app
@@ -15,24 +15,27 @@ ARG NEXT_PUBLIC_WS_URL=ws://localhost/ws/ticker
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
 
+# 生成静态导出 → out/ 目录（需要 next.config.js 的 output:'export'）
 RUN npm run build
 
-# 运行阶段
-FROM node:22-alpine
+# 运行阶段：nginx 提供静态文件
+FROM nginx:alpine
 
-WORKDIR /app
+# 复制静态导出文件到 nginx html 目录
+COPY --from=builder /app/out /usr/share/nginx/html
 
-ENV NODE_ENV=production
+# 简单的 nginx 配置（SPA fallback for client-side routing）
+RUN echo 'server {' \
+    '    listen 80;' \
+    '    server_name _;' \
+    '    root /usr/share/nginx/html;' \
+    '    index index.html;' \
+    '    location / { try_files $uri $uri/ /index.html; }' \
+    '}' > /etc/nginx/conf.d/default.conf
 
-COPY --from=builder /app/.next ./.next
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/package.json ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/next.config.js ./
-
-EXPOSE 3000
+EXPOSE 80
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD wget --quiet --tries=1 --spider http://localhost:3000/ || exit 1
+    CMD wget --quiet --tries=1 --spider http://localhost:80/ || exit 1
 
-CMD ["npm", "start"]
+CMD ["nginx", "-g", "daemon off;"]

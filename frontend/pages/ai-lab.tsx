@@ -5,6 +5,12 @@ import {
   FlaskConical, Target, Play, RefreshCw, ShieldCheck, ShieldAlert,
   Activity, TrendingUp, DollarSign, BarChart3, Clock, Zap, ChevronRight,
 } from "lucide-react";
+import type {
+  IterationTaskDetail,
+  IterationTaskSummary,
+  IterationVariant,
+  IterationRound,
+} from "../types/ai-lab";
 
 export default function AILabPage() {
   const { t, lang } = useLanguage();
@@ -18,8 +24,8 @@ export default function AILabPage() {
   const [maxConcentration, setMaxConcentration] = useState(0.3);
   const [running, setRunning] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
-  const [taskData, setTaskData] = useState<any>(null);
-  const [tasks, setTasks] = useState<any[]>([]);
+  const [taskData, setTaskData] = useState<IterationTaskDetail | null>(null);
+  const [tasks, setTasks] = useState<IterationTaskSummary[]>([]);
   const [showHistory, setShowHistory] = useState(false);
 
   // Poll status
@@ -95,7 +101,7 @@ export default function AILabPage() {
   };
 
   const statusBadge = (status: string) => {
-    const colors: any = {
+    const colors: Record<string, string> = {
       pending: "bg-dark-500 text-dark-300",
       running: "bg-blue-500/20 text-blue-400",
       generating: "bg-purple-500/20 text-purple-400",
@@ -111,7 +117,7 @@ export default function AILabPage() {
     );
   };
 
-  const renderBestVariant = (v: any) => (
+  const renderBestVariant = (v: IterationVariant) => (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
         <Zap size={14} className="text-okx-green" />
@@ -126,19 +132,19 @@ export default function AILabPage() {
       <div className="grid grid-cols-2 gap-2 text-xs">
         <div className="bg-dark-800/50 rounded p-2">
           <p className="text-dark-400">Sharpe IS</p>
-          <p className={`font-mono font-bold ${v.sharpe_is >= 1 ? "text-okx-green" : "text-okx-yellow"}`}>
+          <p className={`font-mono font-bold ${(v.sharpe_is ?? 0) >= 1 ? "text-okx-green" : "text-okx-yellow"}`}>
             {v.sharpe_is?.toFixed(2)}
           </p>
         </div>
         <div className="bg-dark-800/50 rounded p-2">
           <p className="text-dark-400">Sharpe OOS</p>
-          <p className={`font-mono font-bold ${v.sharpe_oos >= 1 ? "text-okx-green" : "text-okx-yellow"}`}>
+          <p className={`font-mono font-bold ${(v.sharpe_oos ?? 0) >= 1 ? "text-okx-green" : "text-okx-yellow"}`}>
             {v.sharpe_oos?.toFixed(2)}
           </p>
         </div>
         <div className="bg-dark-800/50 rounded p-2">
           <p className="text-dark-400">Return %</p>
-          <p className={`font-mono font-bold ${v.total_return_pct >= 0 ? "text-okx-green" : "text-okx-red"}`}>
+          <p className={`font-mono font-bold ${(v.total_return_pct ?? 0) >= 0 ? "text-okx-green" : "text-okx-red"}`}>
             {v.total_return_pct?.toFixed(1)}%
           </p>
         </div>
@@ -148,13 +154,13 @@ export default function AILabPage() {
         </div>
         <div className="bg-dark-800/50 rounded p-2">
           <p className="text-dark-400">PBO</p>
-          <p className={`font-mono font-bold ${v.pbo <= 0.5 ? "text-okx-green" : "text-okx-red"}`}>
+          <p className={`font-mono font-bold ${(v.pbo ?? 0) <= 0.5 ? "text-okx-green" : "text-okx-red"}`}>
             {((v.pbo ?? 0) * 100).toFixed(1)}%
           </p>
         </div>
         <div className="bg-dark-800/50 rounded p-2">
           <p className="text-dark-400">DSR</p>
-          <p className={`font-mono font-bold ${v.dsr > 0 ? "text-okx-green" : "text-okx-red"}`}>
+          <p className={`font-mono font-bold ${(v.dsr ?? 0) > 0 ? "text-okx-green" : "text-okx-red"}`}>
             {v.dsr?.toFixed(2)}
           </p>
         </div>
@@ -213,19 +219,19 @@ export default function AILabPage() {
           {tasks.length === 0 ? (
             <div className="card text-center py-12 text-dark-500 text-xs">No tasks yet</div>
           ) : (
-            tasks.map((t: any) => (
-              <div key={t.task_id} className="card flex items-center justify-between">
+            tasks.map((task: IterationTaskSummary) => (
+              <div key={task.task_id} className="card flex items-center justify-between">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 mb-1">
-                    <p className="text-sm text-white font-semibold truncate">{t.goal}</p>
-                    {statusBadge(t.status)}
+                    <p className="text-sm text-white font-semibold truncate">{task.goal}</p>
+                    {statusBadge(task.status)}
                   </div>
                   <p className="text-[10px] text-dark-400">
-                    {t.symbol} {t.timeframe} · {t.current_round}/{t.max_rounds} rounds · {t.total_variants} variants
-                    {t.converged && <span className="text-okx-green ml-2">{t("ailab.converged")}</span>}
+                    {task.symbol} {task.timeframe} · {task.current_round}/{task.max_rounds} rounds · {task.total_variants} variants
+                    {task.converged && <span className="text-okx-green ml-2">{t("ailab.converged")}</span>}
                   </p>
                 </div>
-                <button onClick={() => viewTask(t.task_id)}
+                <button onClick={() => viewTask(task.task_id)}
                   className="text-xs text-okx-green hover:text-okx-green/80 flex items-center gap-1 ml-4">
                   {t("ailab.viewDetail")} <ChevronRight size={12} />
                 </button>
@@ -341,14 +347,14 @@ export default function AILabPage() {
                     </div>
                     <div className="w-full bg-dark-800 rounded-full h-2">
                       <div className="bg-okx-green h-2 rounded-full transition-all duration-500"
-                        style={{width: `${taskData.progress_pct || (taskData.current_round / taskData.max_rounds * 100)}%`}} />
+                        style={{width: `${taskData.progress_pct || ((taskData.current_round ?? 0) / (taskData.max_rounds || 1) * 100)}%`}} />
                     </div>
                   </div>
 
                   {/* Stats row */}
                   <div className="grid grid-cols-3 gap-2">
                     <div className="bg-dark-800/50 rounded p-2 text-center">
-                      <p className="text-[10px] text-dark-400">{t("ailab.variantsDone").replace("{n}", taskData.total_variants || "0")}</p>
+                      <p className="text-[10px] text-dark-400">{t("ailab.variantsDone").replace("{n}", String(taskData.total_variants ?? 0))}</p>
                       <p className="font-mono font-bold text-white text-sm">{taskData.total_variants || 0}</p>
                     </div>
                     <div className="bg-dark-800/50 rounded p-2 text-center">
@@ -374,23 +380,23 @@ export default function AILabPage() {
                   {/* Rounds list */}
                   {taskData.rounds?.length > 0 && (
                     <div className="space-y-2 max-h-80 overflow-y-auto">
-                      {taskData.rounds.map((rd: any, i: number) => {
+                      {taskData.rounds.map((rd: IterationRound, i: number) => {
                         const variants = rd.variants || [];
-                        const ranked = [...variants].sort((a:any,b:any) => (b.score||0) - (a.score||0));
+                        const ranked = [...variants].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
                         return (
                           <div key={i} className="bg-dark-800/30 rounded p-3">
                             <div className="flex items-center justify-between mb-2">
                               <span className="text-xs font-semibold text-dark-200">
-                                {t("ailab.round").replace("{n}", rd.round_number)}
+                                {t("ailab.round").replace("{n}", String(rd.round_number ?? rd.round))}
                               </span>
-                              {statusBadge(rd.status)}
+                              {statusBadge(rd.status ?? "done")}
                             </div>
                             <div className="text-[10px] text-dark-400 mb-2">
-                              {ranked.length} variants · Top Sharpe OOS: {rd.top_sharpe_oos?.toFixed(2)}
+                              {ranked.length} variants · Top Sharpe OOS: {rd.top_sharpe_oos?.toFixed(2) ?? "-"}
                             </div>
                             {/* Top 3 variants */}
                             <div className="space-y-1">
-                              {ranked.slice(0, 3).map((v: any, j: number) => (
+                              {ranked.slice(0, 3).map((v: IterationVariant, j: number) => (
                                 <div key={j} className="flex items-center justify-between text-[10px]">
                                   <div className="flex items-center gap-1.5">
                                     <span className={`font-mono ${j===0 ? "text-okx-yellow" : "text-dark-500"}`}>#{j+1}</span>
@@ -398,8 +404,8 @@ export default function AILabPage() {
                                     <span className="text-dark-500">{JSON.stringify(v.params)}</span>
                                   </div>
                                   <div className="flex items-center gap-2 font-mono">
-                                    <span className={v.sharpe_oos >= 1 ? "text-okx-green" : "text-dark-400"}>
-                                      OOS:{v.sharpe_oos?.toFixed(2)}
+                                    <span className={(v.sharpe_oos ?? 0) >= 1 ? "text-okx-green" : "text-dark-400"}>
+                                      OOS:{v.sharpe_oos?.toFixed(2) ?? "-"}
                                     </span>
                                     <span className="text-okx-yellow">{v.score?.toFixed(3)}</span>
                                     {v.scientific_passed
