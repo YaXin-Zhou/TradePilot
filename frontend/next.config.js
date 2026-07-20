@@ -2,6 +2,9 @@
 const nextConfig = {
   reactStrictMode: true,
 
+  // Docker: 静态导出 -> Nginx
+  output: "export",
+
   // Phase 8: SWC 编译器优化
   swcMinify: true,
 
@@ -15,31 +18,10 @@ const nextConfig = {
     optimizePackageImports: ["lucide-react", "recharts", "react-hot-toast"],
   },
 
-  // Phase 8: 图片优化
+  // Docker 静态导出：禁用图片优化（Nginx 直接提供）
   images: {
-    formats: ["image/avif", "image/webp"],
+    unoptimized: true,
   },
-
-  // Phase 8: 静态资源缓存头
-  async headers() {
-    return [
-      {
-        source: "/_next/static/:path*",
-        headers: [
-          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
-        ],
-      },
-      {
-        source: "/favicon.ico",
-        headers: [
-          { key: "Cache-Control", value: "public, max-age=86400" },
-        ],
-      },
-    ];
-  },
-
-  // Phase 8: 压缩
-  compress: true,
 
   // Phase 8: powered by header 移除（安全）
   poweredByHeader: false,
