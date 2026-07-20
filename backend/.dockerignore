@@ -1,0 +1,26 @@
+# 安全 — 防止敏感信息打进镜像
+.env
+.env.local
+.env.*
+
+# 运行时数据（通过 volume 挂载，不需打进镜像）
+data/
+logs/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 测试（生产镜像不需要）
+tests/
+
+# 版本控制
+.git/
+.gitignore
+
+# 文档
+*.md
