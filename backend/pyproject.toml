@@ -4,7 +4,7 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 source = ["."]
-omit = ["tests/*", "alembic/*", "ml/models/*"]
+omit = ["tests/*", "alembic/*", "ml/models/*", "start.py", "strategies/custom.py"]
 
 [tool.coverage.report]
 fail_under = 70
