@@ -74,6 +74,9 @@ services:
 
   nginx:
     restart: always
+    ports:
+      - "80:80"
+      - "443:443"  # v1.2: HTTPS
     deploy:
       resources:
         limits:
