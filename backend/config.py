@@ -132,6 +132,18 @@ class Settings:
         if self.ENCRYPTION_KEY == "" and not self.DEBUG:
             warnings.append("ENCRYPTION_KEY 未设置（生产建议显式配置）")
 
+        # v1.1: 非 DEBUG 模式下检测空 OKX Key（生产必须配置）
+        if not self.DEBUG and self.EXCHANGE_API_KEY == "":
+            warnings.append(
+                "EXCHANGE_API_KEY 为空且非 DEBUG 模式 — "
+                "交易所将无法连接，所有交易请求会失败"
+            )
+        if not self.DEBUG and "sqlite" in self.DATABASE_URL.lower():
+            warnings.append(
+                "DATABASE_URL 使用 SQLite — Docker 重启后数据可能丢失。"
+                "生产环境请使用 PostgreSQL"
+            )
+
         # N3: 检测 <CHANGE_ME> 占位符（防 .env.example 复制后漏改）
         placeholders: list[str] = []
         if self.EXCHANGE_API_KEY == "<CHANGE_ME>":

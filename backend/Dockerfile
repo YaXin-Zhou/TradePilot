@@ -1,5 +1,5 @@
-# AI Quant Trade — Backend Dockerfile
-# M5: 统一 Python 3.13 + 多 worker 支持
+# AI Quant Trade — Backend Dockerfile v1.1
+# Python 3.13 + 多 worker + 优雅关闭
 FROM python:3.13-slim
 
 WORKDIR /app
@@ -22,9 +22,9 @@ RUN mkdir -p /app/data /app/logs
 # 端口
 EXPOSE 8000
 
-# 健康检查
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')" || exit 1
+# 健康检查（v1.1: 127.0.0.1 避免 IPv6 解析问题）
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')" || exit 1
 
-# 启动 — M5: 默认 4 workers（M4 保证多 worker 安全）
-CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+# 启动 — v1.1: 添加 timeout-graceful-shutdown 确保 Docker stop 优雅退出
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--timeout-graceful-shutdown", "30"]

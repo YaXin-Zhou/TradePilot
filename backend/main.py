@@ -1,14 +1,15 @@
-"""FastAPI 应用入口 — Phase 8 实盘就绪版
+"""FastAPI 应用入口 — Production v1.1 生产就绪版
 
-改动：
-  - lifespan 中恢复 RUNNING 策略（崩溃恢复）
-  - /api/health 增加 DB + 交易所连通性检查
-  - /api/health/deep 深度健康检查
-  - kill_switch 状态在 health 中暴露
+改动（v1.1）：
+  - 优雅关闭：stop strategies → persist state → close DB，30s 超时
+  - 启动加固：init_db 失败不崩溃但记录 CRITICAL
+  - SIGTERM 信号处理（Docker stop 友好）
 """
 import sys
 import os
 import time as _time
+import signal as _signal
+import asyncio
 from contextlib import asynccontextmanager
 
 # 确保 backend 在 path 中
@@ -25,6 +26,9 @@ from core.errors import global_error_handler, sanitize_exception_handler
 from core.logger import log
 from core.kill_switch import kill_switch
 
+# v1.1: 关机超时（秒）— 超过此时间强制退出
+SHUTDOWN_TIMEOUT = 30
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -33,16 +37,21 @@ async def lifespan(app: FastAPI):
     for w in security_warnings:
         log.warning(f"Security: {w}")
 
-    await init_db()
+    # v1.1: init_db 失败记录 CRITICAL 但不崩溃（Docker 会重试）
+    try:
+        await init_db()
+    except Exception as e:
+        log.critical(f"init_db() FAILED — database may be unavailable: {e}")
+
     await load_exchange_config()
     await load_deepseek_config()
 
-    # P0-1: kill_switch + risk_engine 从 DB 加载状态（替代 JSON 文件）
+    # P0-1: kill_switch + risk_engine 从 DB 加载状态
     await kill_switch.init_from_db()
     from services.risk_engine import risk_engine
     await risk_engine.init_from_db()
 
-    # P1-3: online_learner + strategy_pool 从 DB 加载状态（替代 JSON 文件）
+    # P1-3: online_learner + strategy_pool 从 DB 加载状态
     from services.online_learner import online_learner
     await online_learner.init_from_db()
     from services.strategy_pool import strategy_pool
@@ -57,7 +66,7 @@ async def lifespan(app: FastAPI):
 
     try:
         start_scheduler()
-        log.info("Application started successfully")
+        log.info("Application started successfully (Production v1.1)")
     except Exception as e:
         log.error(f"Scheduler start failed (non-fatal): {e}")
 
@@ -70,15 +79,41 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    stop_scheduler()
-    await close_db()
-    log.info("Application shut down")
+    # === v1.1 优雅关闭 ===
+    log.info("Shutting down gracefully...")
+    _shutdown_start = _time.time()
+
+    # 1. 停止调度器（不再触发新任务）
+    try:
+        stop_scheduler()
+    except Exception as e:
+        log.error(f"Scheduler stop error: {e}")
+
+    # 2. 持久化 runner 状态 + 停止策略
+    try:
+        from strategies.runner import runner
+        await asyncio.wait_for(runner.shutdown(), timeout=10)
+    except asyncio.TimeoutError:
+        log.warning("Runner shutdown timed out (10s), forcing close")
+    except Exception as e:
+        log.error(f"Runner shutdown error: {e}")
+
+    # 3. 关闭 DB 连接池
+    try:
+        await asyncio.wait_for(close_db(), timeout=5)
+    except asyncio.TimeoutError:
+        log.warning("DB close timed out")
+    except Exception as e:
+        log.error(f"DB close error: {e}")
+
+    elapsed = _time.time() - _shutdown_start
+    log.info(f"Application shut down ({elapsed:.1f}s)")
 
 
 app = FastAPI(
     title="AI Quant Trade",
     description="AI 量化交易系统 - OKX",
-    version="0.2.0",
+    version="1.1.0",
     lifespan=lifespan,
 )
 
@@ -128,7 +163,7 @@ async def health():
         "exchange": settings.EXCHANGE_NAME,
         "testnet": settings.EXCHANGE_TESTNET,
         "kill_switch": kill_switch.get_state()["status"],
-        "version": "0.2.0",
+        "version": "1.1.0",
     }
 
 

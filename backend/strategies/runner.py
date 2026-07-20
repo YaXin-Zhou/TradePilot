@@ -347,6 +347,19 @@ class StrategyRunner:
                 log.error(f"Runner: stop_all failed for {sid}: {e}")
         return n
 
+    async def shutdown(self):
+        """v1.1 优雅关闭：停止全部策略 + 持久化所有持仓状态"""
+        log.info("Runner: graceful shutdown — stopping all strategies...")
+        stopped = await self.stop_all()
+        log.info(f"Runner: stopped {stopped} strategies")
+        # 最终持久化（确保剩余持仓不丢失）
+        for sid in list(self._positions_usdt.keys()):
+            try:
+                await self._persist_state(sid)
+            except Exception as e:
+                log.error(f"Runner: final persist failed for {sid}: {e}")
+        log.info("Runner: shutdown complete")
+
     async def recover_running_strategies(self):
         """启动时恢复所有 status=RUNNING 的策略。
 
