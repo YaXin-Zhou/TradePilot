@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 export default function Dashboard() {
-  const [ticker, setTicker] = useState<any>(null);
+  const [ticker, setTicker] = useState<Record<string, any> | null>(null);
   const { t } = useLanguage();
   useRealtime({ onTicker: setTicker });
 
@@ -200,7 +200,7 @@ export default function Dashboard() {
                   </td>
                 </tr>
               )}
-              {trades.slice(0, 10).map((t: any) => (
+              {trades.slice(0, 10).map((t: Record<string, any>) => (
                 <tr key={t.id} className="border-b border-dark-800/50 hover:bg-dark-800/30">
                   <td className="py-2.5 pr-4 font-medium text-dark-200">{t.symbol}</td>
                   <td className="text-right px-2 py-2 font-mono">${t.buy_price?.toFixed(2)}</td>

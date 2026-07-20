@@ -30,8 +30,8 @@ export default function LoginPage() {
       } else {
         setError(data.detail?.[0]?.msg || data.detail || "Auth failed");
       }
-    } catch (e: any) {
-      setError(e.message || "Network error");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Network error");
     }
     setLoading(false);
   };

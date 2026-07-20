@@ -30,7 +30,7 @@ interface BacktestParams {
   [key: string]: number | undefined;
 }
 
-function MetricCard({ icon: Icon, label, value, color, suffix }: any) {
+function MetricCard({ icon: Icon, label, value, color, suffix }: { icon: React.ComponentType<Record<string, any>>; label: string; value: string; color: string; suffix?: string }) {
   return (
     <div className="card">
       <div className="flex items-center gap-2 mb-2">
@@ -44,7 +44,7 @@ function MetricCard({ icon: Icon, label, value, color, suffix }: any) {
   );
 }
 
-function formatTime(ts: any) {
+function formatTime(ts: number | string) {
   if (!ts) return "-";
   try { return new Date(ts).toLocaleString(); }
   catch { return String(ts).slice(0, 19); }
@@ -60,7 +60,7 @@ export default function BacktestPage() {
   const [slippage, setSlippage] = useState(0.001);
   const [strategy, setStrategy] = useState("ma_crossover");
   const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<Record<string, any> | null>(null);
   const [params, setParams] = useState<BacktestParams>({ fast: 10, slow: 30 });
 
   const runBacktest = async () => {
@@ -421,7 +421,7 @@ export default function BacktestPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {result.trades.map((trade: any, i: number) => (
+                        {result.trades.map((trade: Record<string, any>, i: number) => (
                           <tr key={i} className="border-b border-dark-800/50 last:border-0 hover:bg-dark-800/30">
                             <td className="py-2 pr-3 text-dark-200">{formatTime(trade.entry_time)}</td>
                             <td className="text-right px-2 py-2 font-mono text-dark-200">${Number(trade.entry_price).toFixed(2)}</td>

@@ -4,11 +4,11 @@ import { useLanguage } from "../../lib/LanguageContext";
 import { Brain, Activity, BarChart3, TrendingUp, TrendingDown, RefreshCw, ArrowUpRight, ArrowDownRight, Minus } from "lucide-react";
 
 export default function AnalysisPage() {
-  const [indicators, setIndicators] = useState<any>(null);
-  const [prediction, setPrediction] = useState<any>(null);
-  const [regime, setRegime] = useState<any>(null);
+  const [indicators, setIndicators] = useState<Record<string, any> | null>(null);
+  const [prediction, setPrediction] = useState<Record<string, any> | null>(null);
+  const [regime, setRegime] = useState<Record<string, any> | null>(null);
   const [training, setTraining] = useState(false);
-  const [trainResult, setTrainResult] = useState<any>(null);
+  const [trainResult, setTrainResult] = useState<Record<string, any> | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const { t } = useLanguage();
 

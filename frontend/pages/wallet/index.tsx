@@ -4,7 +4,7 @@ import { useLanguage } from "../../lib/LanguageContext";
 import { Wallet, DollarSign, Bitcoin } from "lucide-react";
 
 export default function WalletPage() {
-  const [balance, setBalance] = useState<any>(null);
+  const [balance, setBalance] = useState<Record<string, any> | null>(null);
   const { t } = useLanguage();
 
   useEffect(() => {

@@ -57,7 +57,7 @@ export default function SettingsPage() {
 
   const loadDeepSeek = async () => {
     try {
-      const data: any = await api.getDeepSeekSettings();
+      const data = await api.getDeepSeekSettings();
       setDsStatus(data);
       // 不回显脱敏值到输入框，避免误覆盖
     } catch (e) {
@@ -70,13 +70,13 @@ export default function SettingsPage() {
     setDsSaving(true);
     setDsMsg(null);
     try {
-      const res: any = await api.saveDeepSeekSettings({ api_key: dsKey });
+      const res = await api.saveDeepSeekSettings({ api_key: dsKey });
       setDsMsg({ ok: res?.test_ok !== false, msg: res?.test_msg || t("settings.saved") });
       // 保存成功后清空输入框
       setDsKey("");
       await loadDeepSeek();
-    } catch (e: any) {
-      setDsMsg({ ok: false, msg: e.message || "Save failed" });
+    } catch (e: unknown) {
+      setDsMsg({ ok: false, msg: e instanceof Error ? e.message : String(e) || "Save failed" });
     }
     setDsSaving(false);
     setTimeout(() => setDsMsg(null), 4000);
@@ -87,10 +87,10 @@ export default function SettingsPage() {
     setDsMsg(null);
     try {
       // 空值时后端会从 DB 读已保存的 Key 测试（与 save 逻辑一致）
-      const res: any = await api.testDeepSeekConnection({ api_key: dsKey });
+      const res = await api.testDeepSeekConnection({ api_key: dsKey });
       setDsMsg({ ok: res.success !== false, msg: res?.message || (res.success !== false ? t("settings.testOk") : "Failed") });
-    } catch (e: any) {
-      setDsMsg({ ok: false, msg: e.message || "Connection failed" });
+    } catch (e: unknown) {
+      setDsMsg({ ok: false, msg: e instanceof Error ? e.message : String(e) || "Connection failed" });
     }
     setDsTesting(false);
   };
@@ -109,7 +109,7 @@ export default function SettingsPage() {
     setSaving(true);
     setSavedMsg(null);
     try {
-      const res: any = await api.saveExchangeSettings({
+      const res = await api.saveExchangeSettings({
         mode: activeTab,
         api_key: currentForm.api_key,
         secret: currentForm.secret,
@@ -119,9 +119,9 @@ export default function SettingsPage() {
       // 保存成功后清空输入框（后端对空值保留原 Key）
       setCurrentForm({ api_key: "", secret: "", passphrase: "" });
       await loadSettings();
-    } catch (e: any) {
+    } catch (e: unknown) {
       setSavedMsg(null);
-      setTestResult({ ok: false, msg: e.message || "Save failed" });
+      setTestResult({ ok: false, msg: e instanceof Error ? e.message : String(e) || "Save failed" });
     }
     setSaving(false);
     setTimeout(() => setSavedMsg(null), 3000);
@@ -132,15 +132,15 @@ export default function SettingsPage() {
     setTestResult(null);
     try {
       // 空值时后端会从 DB 读已保存的 Key 测试（与 save 逻辑一致）
-      const res: any = await api.testConnection({
+      const res = await api.testConnection({
         mode: activeTab,
         api_key: currentForm.api_key,
         secret: currentForm.secret,
         passphrase: currentForm.passphrase,
       });
       setTestResult({ ok: res.success !== false, msg: res?.message || (res.success !== false ? t("settings.testOk") : "Failed") });
-    } catch (e: any) {
-      setTestResult({ ok: false, msg: e.message || "Connection failed" });
+    } catch (e: unknown) {
+      setTestResult({ ok: false, msg: e instanceof Error ? e.message : String(e) || "Connection failed" });
     }
     setTesting(false);
   };
@@ -153,15 +153,15 @@ export default function SettingsPage() {
     setSwitching(true);
     setSwitchMsg(null);
     try {
-      const res: any = await api.switchExchangeMode({ mode: activeTab, confirm: activeTab === "live" });
+      const res = await api.switchExchangeMode({ mode: activeTab, confirm: activeTab === "live" });
       if (res.success === false) {
         setSwitchMsg({ ok: false, msg: res.error || "Switch failed" });
       } else {
         setSwitchMsg({ ok: true, msg: `${t("settings.switchOk")} → ${res?.data?.mode_label || activeTab}` });
         await loadSettings();
       }
-    } catch (e: any) {
-      setSwitchMsg({ ok: false, msg: e.message || "Switch failed" });
+    } catch (e: unknown) {
+      setSwitchMsg({ ok: false, msg: e instanceof Error ? e.message : String(e) || "Switch failed" });
     }
     setSwitching(false);
     setTimeout(() => setSwitchMsg(null), 4000);

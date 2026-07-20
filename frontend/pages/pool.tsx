@@ -10,8 +10,8 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function StrategyPoolPage() {
   const { t } = useLanguage();
-  const [summary, setSummary] = useState<any>(null);
-  const [correlation, setCorrelation] = useState<any>(null);
+  const [summary, setSummary] = useState<Record<string, any> | null>(null);
+  const [correlation, setCorrelation] = useState<Record<string, any> | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
@@ -65,7 +65,7 @@ export default function StrategyPoolPage() {
             <div className="grid grid-cols-5 gap-2 pb-2 border-b border-dark-500 text-dark-400 mb-2">
               <span>Name</span><span>Type</span><span>Weight</span><span>Sharpe</span><span>Status</span>
             </div>
-            {summary?.strategies?.map((s: any) => (
+            {summary?.strategies?.map((s: Record<string, any>) => (
               <div key={s.id} className="grid grid-cols-5 gap-2 py-1.5 hover:bg-dark-600/50 rounded px-1 -mx-1 items-center">
                 <span className="truncate">{s.name}</span>
                 <span className="text-dark-400">{s.strategy_type}</span>
@@ -95,13 +95,13 @@ export default function StrategyPoolPage() {
             <div>
               <div className="flex gap-1 mb-2">
                 <div className="w-16" />
-                {correlation.labels.map((l: string, i: number) => (
+                {correlation?.labels?.map((l: string, i: number) => (
                   <div key={i} className="flex-1 text-center text-xs text-dark-400 truncate" title={l}>
                     {l.slice(0, 8)}
                   </div>
                 ))}
               </div>
-              {correlation.matrix.map((row: number[], i: number) => (
+              {correlation?.matrix.map((row: number[], i: number) => (
                 <div key={i} className="flex gap-1 mb-1">
                   <div className="w-16 text-xs text-dark-400 truncate" title={correlation.labels[i]}>
                     {correlation.labels[i].slice(0, 8)}
@@ -134,7 +134,7 @@ export default function StrategyPoolPage() {
   );
 }
 
-function StatCard({ label, value, icon: Icon, color }: any) {
+function StatCard({ label, value, icon: Icon, color }: { label: string; value: string; icon: React.ComponentType<Record<string, any>>; color: string }) {
   return (
     <div className="card flex items-center gap-3">
       <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ background: color + "20" }}>

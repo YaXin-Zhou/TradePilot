@@ -21,7 +21,7 @@ export default function RiskSettingsPage() {
   const [toast, setToast] = useState("");
 
   useEffect(() => {
-    api.getRiskPolicies().then((r: any) => {
+    api.getRiskPolicies().then((r: Record<string, any>) => {
       if (r.success) {
         setPolicies(r.data);
         setEditing(r.data);
@@ -29,8 +29,8 @@ export default function RiskSettingsPage() {
     });
   }, []);
 
-  function updateField(field: string, value: any) {
-    setEditing((prev: any) => ({
+  function updateField(field: string, value: unknown) {
+    setEditing((prev: Record<string, any>) => ({
       ...prev,
       [activeRegime]: { ...prev[activeRegime], [field]: value },
     }));
@@ -52,7 +52,7 @@ export default function RiskSettingsPage() {
         ...editing[activeRegime],
       });
       if (r.success) {
-        setPolicies((prev: any) => ({ ...prev, [activeRegime]: r.data }));
+        setPolicies((prev: Record<string, any>) => ({ ...prev, [activeRegime]: r.data }));
         setToast(t("risk.saved"));
         setTimeout(() => setToast(""), 2000);
       }

@@ -23,7 +23,7 @@ export default function StrategiesPage() {
     load();
   };
 
-  const toggleStrategy = async (s: any) => {
+  const toggleStrategy = async (s: Record<string, any>) => {
     await api.updateStrategy(s.id, { status: s.status === "running" ? "stopped" : "running" });
     load();
   };

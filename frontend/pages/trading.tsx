@@ -4,8 +4,8 @@ import { useLanguage } from "../lib/LanguageContext";
 import { TrendingUp, TrendingDown, AlertCircle, RefreshCw } from "lucide-react";
 
 export default function TradingPage() {
-  const [ticker, setTicker] = useState<any>(null);
-  const [balance, setBalance] = useState<any>(null);
+  const [ticker, setTicker] = useState<Record<string, any> | null>(null);
+  const [balance, setBalance] = useState<Record<string, any> | null>(null);
   const [orders, setOrders] = useState<any[]>([]);
   const [side, setSide] = useState("buy");
   const [amount, setAmount] = useState("");
@@ -26,8 +26,8 @@ export default function TradingPage() {
       await api.placeLimitOrder({ symbol: "BTC/USDT", side, amount: parseFloat(amount), price: parseFloat(price || ticker?.last || "0") });
       setStatus(t("trade.placed"));
       setRefreshKey((k) => k + 1);
-    } catch (e: any) {
-      setStatus(`${t("trade.orderErr")}: ${e.message}`);
+    } catch (e: unknown) {
+      setStatus(`${t("trade.orderErr")}: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
 
