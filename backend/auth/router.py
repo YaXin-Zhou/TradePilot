@@ -33,7 +33,7 @@ async def register(req: RegisterRequest, session=Depends(get_session)):
         raise HTTPException(status_code=400, detail="Username already exists")
     user = UserModel(
         name=req.username,
-        email=req.email,
+        email=req.email or None,
         hashed_password=hash_password(req.password),
     )
     session.add(user)

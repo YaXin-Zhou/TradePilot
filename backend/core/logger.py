@@ -31,16 +31,25 @@ class SensitiveFilter(logging.Filter):
 
 
 def setup_logger(name: str = "ai_quant") -> logging.Logger:
-    """创建并配置 logger 实例"""
+    """创建并配置 logger 实例
+
+    FIX: uvicorn --workers 4 使用 fork() 创建子进程，子进程继承父进程的文件句柄
+    但句柄可能失效。解决方案：每次调用都清除旧 handler 重新创建，确保文件句柄有效。
+    """
     logger = logging.getLogger(name)
 
-    if logger.handlers:
-        return logger
+    # 清除可能从父进程继承的失效 handler（uvicorn multi-worker fix）
+    for h in list(logger.handlers):
+        try:
+            h.close()
+        except Exception:
+            pass
+        logger.removeHandler(h)
 
     logger.setLevel(logging.INFO)
+    logger.propagate = False  # 不向 root logger 传播，避免 uvicorn 重复输出
 
     # 文件 Handler — 按大小+日期双轮转，单文件最大 10MB，保留 30 个
-    # Phase 8: 修复原版无单文件大小上限的问题（高频日志会撑大）
     file_handler = logging.handlers.RotatingFileHandler(
         filename=LOG_DIR / "app.log",
         maxBytes=10 * 1024 * 1024,  # 10 MB

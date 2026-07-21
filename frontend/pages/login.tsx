@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
 import { API_BASE } from "@/lib/api";
+import { useLanguage } from "@/lib/LanguageContext";
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
@@ -9,6 +10,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const router = useRouter();
+  const { t } = useLanguage();
 
   useEffect(() => {
     try { if (localStorage.getItem("auth_token")) router.push("/"); } catch {}
@@ -28,10 +30,10 @@ export default function LoginPage() {
         localStorage.setItem("auth_token", data.access_token);
         router.push("/");
       } else {
-        setError(data.detail?.[0]?.msg || data.detail || "Auth failed");
+        setError(data.detail?.[0]?.msg || data.detail || t("auth.failed"));
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Network error");
+      setError(e instanceof Error ? e.message : t("auth.networkError"));
     }
     setLoading(false);
   };
@@ -45,27 +47,31 @@ export default function LoginPage() {
           </div>
           <h2 className="text-lg font-semibold text-white">AI Quant Trade</h2>
         </div>
-        <p className="text-xs text-dark-400 mb-6">{mode === "login" ? "Sign in" : "Create account"}</p>
+        <p className="text-xs text-dark-400 mb-6">
+          {mode === "login" ? t("auth.signIn") : t("auth.createAccount")}
+        </p>
         {error && <div className="text-xs text-okx-red mb-4 p-2 rounded bg-okx-red/10">{error}</div>}
         <div className="space-y-4">
           <div>
-            <label className="text-xs text-dark-400 block mb-1">Username</label>
+            <label className="text-xs text-dark-400 block mb-1">{t("auth.username")}</label>
             <input value={username} onChange={e => setUsername(e.target.value)} className="w-full" />
           </div>
           <div>
-            <label className="text-xs text-dark-400 block mb-1">Password</label>
+            <label className="text-xs text-dark-400 block mb-1">{t("auth.password")}</label>
             <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full" />
           </div>
           <button onClick={handleSubmit} disabled={loading || !username || !password}
             className="btn-primary w-full flex items-center justify-center gap-2 text-sm py-2.5">
-            {loading ? "Loading..." : mode === "login" ? "Sign In" : "Register"}
+            {loading
+              ? t("auth.loading")
+              : mode === "login" ? t("auth.signInBtn") : t("auth.registerBtn")}
           </button>
         </div>
         <p className="text-xs text-dark-500 text-center mt-4">
           {mode === "login" ? (
-            <>No account? <button onClick={() => setMode("register")} className="text-okx-green hover:underline">Register</button></>
+            <>{t("auth.noAccount")} <button onClick={() => setMode("register")} className="text-okx-green hover:underline">{t("auth.register")}</button></>
           ) : (
-            <>Have an account? <button onClick={() => setMode("login")} className="text-okx-green hover:underline">Sign In</button></>
+            <>{t("auth.hasAccount")} <button onClick={() => setMode("login")} className="text-okx-green hover:underline">{t("auth.signInLink")}</button></>
           )}
         </p>
       </div>

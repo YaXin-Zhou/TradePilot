@@ -1,4 +1,4 @@
-"""策略管理服务层 — CRUD + 启停"""
+"""策略管理服务层 — CRUD + 启停 + AI 策略自动入库"""
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -6,7 +6,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Strategy, StrategyType, StrategyStatus
 from db.database import async_session
-from strategies.runner import runner
+from core.logger import log
+
+# AI 策略类型字符串 → StrategyType 枚举映射
+_AI_TYPE_MAP: dict[str, StrategyType] = {
+    "ma_crossover": StrategyType.MA_CROSS,
+    "ma_cross": StrategyType.MA_CROSS,
+    "rsi": StrategyType.RSI,
+    "bollinger": StrategyType.BOLLINGER,
+    "grid": StrategyType.GRID,
+    "custom": StrategyType.CUSTOM,
+}
 
 
 async def list_all_strategies() -> list[dict]:
@@ -127,3 +137,64 @@ async def delete_strategy(strategy_id: str) -> dict:
         await session.delete(s)
         await session.commit()
         return {"success": True}
+
+
+async def save_ai_strategy(
+    name: str,
+    strategy_type: str,
+    symbol: str = "BTC/USDT",
+    config: dict | None = None,
+    backtest: dict | None = None,
+    description: str = "",
+    user_id: str = "",
+) -> dict:
+    """AI 生成策略自动入库 — 创建策略记录 + 写入回测指标
+
+    Args:
+        name: 策略名称（AI 自动生成或用户指定）
+        strategy_type: AI 返回的策略类型字符串（如 "ma_crossover"）
+        symbol: 交易对
+        config: 策略参数（如 {fast: 10, slow: 30}）
+        backtest: 回测结果（sharpe_ratio, win_rate, total_trades, max_drawdown_pct, total_return_pct）
+        description: AI 策略描述
+
+    Returns:
+        {"success": True, "data": {"id": "xxx"}} 或 {"success": False, "error": "..."}
+    """
+    try:
+        # 类型映射
+        stype = _AI_TYPE_MAP.get(strategy_type, StrategyType.AI_GENERATED)
+
+        async with async_session() as session:
+            strategy = Strategy(
+                name=name,
+                type=stype,
+                symbol=symbol,
+                config={
+                    **(config or {}),
+                    "strategy_type": strategy_type,  # 保留 AI 原始类型名
+                    "description": description,
+                },
+                status=StrategyStatus.DRAFT,
+                user_id=user_id or "default",
+            )
+
+            # 写入回测指标
+            if backtest:
+                strategy.total_trades = int(backtest.get("total_trades", 0))
+                strategy.win_rate = float(backtest.get("win_rate", 0))
+                strategy.sharpe_ratio = float(backtest.get("sharpe_ratio", 0))
+                strategy.max_drawdown = float(backtest.get("max_drawdown_pct", 0))
+                strategy.total_pnl = float(backtest.get("total_return_pct", 0))
+
+            session.add(strategy)
+            await session.commit()
+            await session.refresh(strategy)
+            sid = strategy.id
+
+        log.info(f"AI 策略自动入库: {sid} ({name}, {strategy_type})")
+        return {"success": True, "data": {"id": sid}}
+
+    except Exception as e:
+        log.error(f"AI 策略入库失败: {e}")
+        return {"success": False, "error": str(e)[:200]}

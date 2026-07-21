@@ -10,7 +10,8 @@ class TestScheduler:
         assert callable(start_scheduler)
         assert callable(stop_scheduler)
 
-    def test_scheduler_jobs_registered(self):
+    @pytest.mark.asyncio
+    async def test_scheduler_jobs_registered(self):
         from tasks.scheduler import start_scheduler, stop_scheduler
         start_scheduler()
         try:

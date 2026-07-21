@@ -78,9 +78,10 @@ class FeatureEngine:
         df["high_low_pct"] = (df["high"] - df["low"]) / df["close"]
         df["close_open_pct"] = (df["close"] - df["open"]) / df["open"]
 
-        # 删除 NaN 行
+        # 只删除核心指标为 NaN 的行（SMA_200 等长周期指标允许 NaN）
         df = df.replace([np.inf, -np.inf], np.nan)
-        df = df.dropna()
+        core_cols = ["rsi_14", "macd", "close", "ema_9", "ema_21", "atr_14"]
+        df = df.dropna(subset=[c for c in core_cols if c in df.columns])
         return df
 
     def get_feature_columns(self) -> list:

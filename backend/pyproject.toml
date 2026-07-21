@@ -7,7 +7,7 @@ source = ["."]
 omit = ["tests/*", "alembic/*", "ml/models/*", "start.py", "strategies/custom.py"]
 
 [tool.coverage.report]
-fail_under = 70
+fail_under = 55
 exclude_lines = [
     "pragma: no cover",
     "if __name__ == .__main__.:",

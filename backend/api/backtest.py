@@ -121,17 +121,20 @@ async def _run_backtest_bg(task_id: str, body: dict):
             task["error"] = f"Not enough data ({len(ohlcv_df) if ohlcv_df is not None else 0} bars)"
             return
 
-        _progress("IS/OOS split", 25)
-        _progress("IS backtest", 50)
+        _progress("IS backtest", 30)
         result = run_backtest(
             ohlcv_df,
             body.get("strategy", "ma_crossover"),
             float(body.get("capital", 10000)),
             body.get("params", {}),
+            position_size_pct=float(body.get("position_size", 0.95)),
+            trading_fee_pct=float(body.get("trading_fee", 0.001)),
+            slippage_pct=float(body.get("slippage", 0.001)),
+            with_validation=True,
         )
 
-        _progress("OOS backtest", 70)
-        _progress("PBO calculation", 90)
+        _progress("Validation", 70)
+        _progress("Saving result", 90)
 
         save_to_history(
             body.get("strategy", "ma_crossover"),
@@ -167,7 +170,7 @@ async def api_run_backtest_async(body: dict):
         "error": None,
     }
     asyncio.create_task(_run_backtest_bg(task_id, body))
-    return {"success": True, "task_id": task_id, "status": "pending"}
+    return {"success": True, "data": {"task_id": task_id, "status": "pending"}}
 
 
 @router.get("/async/{task_id}")

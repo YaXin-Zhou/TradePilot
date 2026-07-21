@@ -1,4 +1,7 @@
-"""AI 策略服务层 — 市场数据获取、特征计算、AI 分析、策略回测分发"""
+"""AI 策略服务层 — 市场数据获取、特征计算、AI 分析、策略回测分发、自动入库"""
+import math
+import uuid
+from datetime import datetime
 import httpx
 from core.exchange import shared_exchange as _exchange
 from config import settings
@@ -9,6 +12,19 @@ from ml.features import FeatureEngine
 
 # 模块级单例
 _fe = FeatureEngine()
+
+
+def _sanitize_json(obj):
+    """递归替换 NaN/Inf 为 None，确保 JSON 可序列化"""
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    if isinstance(obj, dict):
+        return {k: _sanitize_json(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_json(v) for v in obj]
+    return obj
 
 
 def _get_ai_engine() -> AIStrategyEngine | None:
@@ -24,8 +40,10 @@ async def analyze_market(
     timeframe: str = "1h",
     auto: bool = False,
     strategy_desc: str = "",
+    name: str = "",
+    user_id: str = "",
 ) -> dict:
-    """分析市场并返回 AI 信号 + 策略建议 + 回测结果"""
+    """分析市场并返回 AI 信号 + 策略建议 + 回测结果（自动入库到策略表+策略池）"""
 
     engine = _get_ai_engine()
     if engine is None:
@@ -76,21 +94,55 @@ async def analyze_market(
         except Exception as e:
             log.warning(f"Auto backtest failed: {e}")
 
-    # 5. 构造响应
+    # 5. 构造响应（NaN→None 防止 JSON 序列化失败）
+    backtest_formatted = _format_backtest_result(backtest_result)
+
+    # 6. 自动入库：策略 → 策略表 + 策略池
+    strategy_id = None
+    pool_registered = False
+    if st and backtest_formatted:
+        try:
+            from services.strategy_service import save_ai_strategy
+            from services.strategy_pool import strategy_pool
+
+            # 自动生成策略名称
+            auto_name = name or f"AI-{st}-{symbol.replace('/', '')}-{datetime.now().strftime('%m%d%H%M')}"
+
+            # 保存到策略表
+            save_result = await save_ai_strategy(
+                name=auto_name,
+                strategy_type=st,
+                symbol=symbol,
+                config=sp,
+                backtest=backtest_formatted,
+                description=strategy_info.get("strategy_description", ""),
+                user_id=user_id,
+            )
+            if save_result.get("success"):
+                strategy_id = save_result["data"]["id"]
+                # 注册到策略池
+                strategy_pool.register(strategy_id, auto_name, st)
+                pool_registered = True
+                log.info(f"AI 策略自动入库+入池: {strategy_id} ({auto_name})")
+        except Exception as e:
+            log.warning(f"AI 策略自动入库失败（不影响主流程）: {e}")
+
     return {
         "success": True,
         "data": {
             "signal": signal.type.value,
-            "confidence": round(signal.confidence, 4),
+            "confidence": round(signal.confidence, 4) if not math.isnan(signal.confidence) else None,
             "reason": signal.reason,
-            "price": signal.price,
+            "price": signal.price if not (isinstance(signal.price, float) and math.isnan(signal.price)) else None,
             "current_price": ticker.get("last", 0),
-            "indicators": indicators,
+            "indicators": _sanitize_json(indicators),
             "strategy_type": st,
             "strategy_description": strategy_info.get("strategy_description", ""),
             "market_assessment": strategy_info.get("market_assessment", ""),
             "strategy_params": sp,
-            "backtest": _format_backtest_result(backtest_result),
+            "backtest": _sanitize_json(backtest_formatted),
+            "strategy_id": strategy_id,
+            "pool_registered": pool_registered,
         },
     }
 

@@ -32,6 +32,13 @@ SHUTDOWN_TIMEOUT = 30
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # FIX: uvicorn --workers 4 fork 后文件句柄失效，在每个 worker 中重新初始化 logger
+    from core.logger import setup_logger
+    setup_logger()  # 清除继承的 handler，重新创建有效的文件句柄
+
+    import os
+    log.info(f"=== Application lifespan starting (pid={os.getpid()}) ===")
+
     # Phase 7.7: 启动时安全校验（生产模式默认 JWT 密钥 → 拒绝启动）
     security_warnings = settings.validate_security()
     for w in security_warnings:
@@ -40,11 +47,25 @@ async def lifespan(app: FastAPI):
     # v1.1: init_db 失败记录 CRITICAL 但不崩溃（Docker 会重试）
     try:
         await init_db()
+        log.info(f"init_db completed (pid={os.getpid()})")
     except Exception as e:
         log.critical(f"init_db() FAILED — database may be unavailable: {e}")
 
     await load_exchange_config()
     await load_deepseek_config()
+
+    # Phase 8: 启动时主动测试交易所连通性（线程池执行，不阻塞 event loop）
+    # 避免前端始终显示"模拟模式—交易所连接不可用"
+    try:
+        import asyncio as _asyncio
+        from core.exchange import shared_exchange
+        await _asyncio.to_thread(shared_exchange._ensure_markets)
+        if shared_exchange._connected:
+            log.info("Exchange connectivity verified on startup")
+        else:
+            log.warning("Exchange connectivity test failed — will retry on first /status poll")
+    except Exception as e:
+        log.warning(f"Exchange startup connectivity test error (non-fatal): {e}")
 
     # P0-1: kill_switch + risk_engine 从 DB 加载状态
     await kill_switch.init_from_db()
@@ -110,11 +131,43 @@ async def lifespan(app: FastAPI):
     log.info(f"Application shut down ({elapsed:.1f}s)")
 
 
+# ──── 自定义 JSON 响应：NaN/Inf → null ────
+import math
+import json as _json
+from starlette.responses import JSONResponse as _JSONResponse
+
+
+def _sanitize_nan(obj):
+    """递归替换 NaN/Inf 为 None"""
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    if isinstance(obj, dict):
+        return {k: _sanitize_nan(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_nan(v) for v in obj]
+    return obj
+
+
+class SafeJSONResponse(_JSONResponse):
+    """自动将 NaN/Inf 转为 null，防止 JSON 序列化崩溃"""
+
+    def render(self, content) -> bytes:
+        return _json.dumps(
+            _sanitize_nan(content),
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+
+
 app = FastAPI(
     title="AI Quant Trade",
     description="AI 量化交易系统 - OKX",
     version="1.1.0",
     lifespan=lifespan,
+    default_response_class=SafeJSONResponse,
 )
 
 # CORS — 白名单模式，仅允许配置的域名

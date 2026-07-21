@@ -2,7 +2,10 @@
 from fastapi import APIRouter, Query, Depends
 from pydantic import BaseModel
 
-from services.portfolio_service import get_portfolio_summary, get_trade_history, get_performance
+from services.portfolio_service import (
+    get_portfolio_summary, get_trade_history, get_performance,
+    get_positions, get_realtime_assets,
+)
 from services.portfolio_allocator import portfolio_allocator
 from auth.deps import get_current_user
 
@@ -22,6 +25,18 @@ async def trade_history(limit: int = Query(100, ge=1, le=500)):
 @router.get("/performance")
 async def performance():
     return await get_performance()
+
+
+@router.get("/positions")
+async def positions():
+    """获取当前持仓列表（现货模式：非 USDT 币种余额，含浮动盈亏）"""
+    return await get_positions()
+
+
+@router.get("/realtime")
+async def realtime_assets():
+    """获取实时资金概览 — 总资产/浮动盈亏/24h变化/可用余额"""
+    return await get_realtime_assets()
 
 
 # ------------------------------------------------------------------

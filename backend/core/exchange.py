@@ -335,6 +335,9 @@ class ExchangeClient:
 
     def fetch_my_trades(self, symbol: str, limit: int = 50) -> list[dict]:
         self._ensure_markets()
+        self._try_reconnect()
+        if not self._connected:
+            return []
         try:
             trades = self._exchange.fetch_my_trades(symbol, limit=limit)
             self._mark_success()
@@ -351,7 +354,10 @@ class ExchangeClient:
                 for t in trades
             ]
         except Exception as e:
-            self._mark_failure()
+            # API 参数/业务错误不应影响连接状态（仅网络错误才 mark_failure）
+            err_str = str(e)
+            if "offline" in err_str.lower() or "timeout" in err_str.lower() or "connection" in err_str.lower():
+                self._mark_failure()
             log.warning(f"fetch_my_trades failed: {e}")
             return []
 

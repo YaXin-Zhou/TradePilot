@@ -106,6 +106,8 @@ export const api = {
   getPortfolioSummary: () => request("/api/portfolio/summary"),
   getTradeHistory: (limit = 100) => request(`/api/portfolio/trades?limit=${limit}`),
   getPerformance: () => request("/api/portfolio/performance"),
+  getPositions: () => request("/api/portfolio/positions"),
+  getRealtimeAssets: () => request("/api/portfolio/realtime"),
 
   // Strategies
   listStrategies: () => request("/api/strategies/"),
@@ -178,7 +180,11 @@ export const api = {
   }) => request("/api/analysis/risk-check", { method: "POST", body: JSON.stringify(data) }),
   // Backtest
   runBacktest: (data: { strategy: string; symbol?: string; timeframe?: string; limit?: number; capital?: number; position_size?: number; trading_fee?: number; slippage?: number; params?: Record<string, unknown> }) =>
-    request("/api/backtest/run", { method: "POST", body: JSON.stringify(data) }),
+    request("/api/backtest/run", { method: "POST", body: JSON.stringify(data) }, 120000), // 120s for full validation
+  runBacktestAsync: (data: { strategy: string; symbol?: string; timeframe?: string; limit?: number; capital?: number; position_size?: number; trading_fee?: number; slippage?: number; params?: Record<string, unknown> }) =>
+    request("/api/backtest/async", { method: "POST", body: JSON.stringify(data) }),
+  getBacktestStatus: (taskId: string) =>
+    request(`/api/backtest/async/${taskId}`),
   getBacktestData: (data: { symbol?: string; timeframe?: string; limit?: number }) =>
     request("/api/backtest/data", { method: "POST", body: JSON.stringify(data) }),
   getBacktestHistory: () => request("/api/backtest/history"),

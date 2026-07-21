@@ -30,12 +30,24 @@ class IterateRequest(BaseModel):
 
 @router.post("/analyze")
 async def ai_analyze(req: AnalyzeRequest, _user: dict = Depends(get_current_user)):
-    return await analyze_market(
-        symbol=req.symbol,
-        timeframe=req.timeframe,
-        auto=req.auto,
-        strategy_desc=req.strategy_desc,
-    )
+    from core.logger import log
+    log.info(f"[AI_DEBUG] Route entered, symbol={req.symbol}, auto={req.auto}")
+    try:
+        log.info(f"[AI_DEBUG] About to call analyze_market...")
+        result = await analyze_market(
+            symbol=req.symbol,
+            timeframe=req.timeframe,
+            auto=req.auto,
+            strategy_desc=req.strategy_desc,
+            name=req.name,
+            user_id=_user.get("id", ""),
+        )
+        log.info(f"[AI_DEBUG] analyze_market returned: success={result.get('success')}")
+        return result
+    except Exception as e:
+        import traceback
+        log.error(f"[AI_DEBUG] AI analyze exception: {type(e).__name__}: {str(e)[:200]}\n{traceback.format_exc()}")
+        return {"success": False, "error": str(e)[:200]}
 
 
 @router.post("/iterate")

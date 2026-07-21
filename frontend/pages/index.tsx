@@ -1,6 +1,6 @@
 import { useState } from "react";
 import PortfolioSummary from "../components/PortfolioSummary";
-import PriceChart from "../components/PriceChart";
+import PriceChart, { LiveTicker } from "../components/PriceChart";
 import { useLanguage } from "../lib/LanguageContext";
 import { useRealtime } from "../lib/useRealtime";
 import { useMarketRegime, useIndicators, usePrediction, useTradeHistory } from "../lib/swr-config";
@@ -10,9 +10,9 @@ import {
 } from "lucide-react";
 
 export default function Dashboard() {
-  const [ticker, setTicker] = useState<Record<string, any> | null>(null);
+  const [ticker, setTicker] = useState<LiveTicker | undefined>(undefined);
   const { t } = useLanguage();
-  useRealtime({ onTicker: setTicker });
+  useRealtime({ onTicker: (data) => setTicker(data as unknown as LiveTicker) });
 
   // SWR 自动轮询替代手动 setInterval
   const { data: regime, mutate: refreshRegime } = useMarketRegime();

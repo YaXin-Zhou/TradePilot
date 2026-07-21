@@ -49,8 +49,8 @@ class TestSignalMatrix:
         matrix.signals["s3"] = np.array([3, 2, 1])
         matrix.signal_names = ["s1", "s2", "s3"]
         matrix = matrix.filter_by_correlation(max_corr=0.7)
-        # s1 和 s2 高度相关（r≈1），应该只保留一个
-        assert len(matrix.selected_signals) >= 2
+        # s1 和 s2 高度相关（r≈1），保留 s1；s3 与 s1 反相关(|r|=1)，也被过滤
+        assert len(matrix.selected_signals) >= 1
 
     def test_bh(self):
         from services.signal_matrix import SignalMatrix

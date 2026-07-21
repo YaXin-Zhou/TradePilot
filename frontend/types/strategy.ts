@@ -84,5 +84,9 @@ export interface AiAnalyzeResult {
     total_trades?: number;
     profit_factor?: number;
   };
+  /** 自动入库后的策略 ID */
+  strategy_id?: string;
+  /** 是否已注册到策略池 */
+  pool_registered?: boolean;
   error?: string;
 }

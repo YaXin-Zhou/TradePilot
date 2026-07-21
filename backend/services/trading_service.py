@@ -10,6 +10,7 @@
   7. 实盘模式 AI 功能禁用
 """
 import asyncio
+import os
 import time
 from core.exchange import shared_exchange, ExchangeError
 from core.tick_cache import tick_cache  # M2: TTL 缓存
@@ -285,13 +286,112 @@ def _check_symbol_whitelist(symbol: str) -> tuple[bool, str]:
     return True, ""
 
 
+# ------------------------------------------------------------------
+# v2.0 P5: 交易安全护栏
+# ------------------------------------------------------------------
+
+# 启动时间戳（用于冷窗口检测）
+_APP_START_TIME = time.time()
+COLD_START_SECONDS = 60
+SLIPPAGE_MAX_PCT = 0.005  # 0.5% 最大滑点
+
+# 策略频率追踪（策略ID → 最近订单时间列表）
+_order_timestamps: dict[str, list[float]] = {}
+MAX_ORDERS_PER_MINUTE = 10
+
+# 策略连续亏损计数
+_strategy_loss_streaks: dict[str, tuple[int, float]] = {}  # strategy_id → (count, last_pnl)
+MAX_CONSECUTIVE_LOSSES = 5
+
+
+def _check_cold_start() -> tuple[bool, str]:
+    """启动后 60 秒内禁止下单，等待 tick_cache 预热和市场数据就绪"""
+    elapsed = time.time() - _APP_START_TIME
+    if elapsed < COLD_START_SECONDS:
+        return False, f"系统预热中，请 {COLD_START_SECONDS - elapsed:.0f}s 后再试"
+    return True, ""
+
+
+def _check_slippage(order_price: float, market_price: float) -> tuple[bool, str]:
+    """滑点保护：市价单执行价与 ticker 偏差超过 0.5% 拒绝"""
+    if market_price <= 0:
+        return True, ""  # 无市价数据时放行
+    slippage = abs(order_price - market_price) / market_price
+    if slippage > SLIPPAGE_MAX_PCT:
+        return False, (
+            f"滑点 {slippage:.2%} 超过阈值 {SLIPPAGE_MAX_PCT:.2%}："
+            f"下单价格={order_price} 市价={market_price}"
+        )
+    return True, ""
+
+
+def _check_order_frequency(strategy_id: str) -> tuple[bool, str]:
+    """异常频率检测：同一策略 1 分钟内超过 10 笔订单自动拒绝"""
+    now = time.time()
+    if strategy_id not in _order_timestamps:
+        _order_timestamps[strategy_id] = []
+    # 清理超过 60s 的旧记录
+    _order_timestamps[strategy_id] = [
+        t for t in _order_timestamps[strategy_id] if now - t < 60
+    ]
+    if len(_order_timestamps[strategy_id]) >= MAX_ORDERS_PER_MINUTE:
+        return False, (
+            f"策略 {strategy_id} 1 分钟内下单 {len(_order_timestamps[strategy_id])} 次，"
+            f"超过阈值 {MAX_ORDERS_PER_MINUTE}，已自动暂停"
+        )
+    _order_timestamps[strategy_id].append(now)
+    return True, ""
+
+
+async def _check_consecutive_losses(strategy_id: str) -> tuple[bool, str]:
+    """连续亏损检测：连续 5 笔亏损自动暂停策略"""
+    from db.models import Trade
+    from sqlalchemy import select, desc
+
+    async with async_session() as session:
+        recent_trades = (
+            await session.execute(
+                select(Trade)
+                .where(Trade.strategy_id == strategy_id)
+                .order_by(desc(Trade.closed_at))
+                .limit(MAX_CONSECUTIVE_LOSSES)
+            )
+        ).scalars().all()
+
+    if len(recent_trades) < MAX_CONSECUTIVE_LOSSES:
+        return True, ""
+
+    consecutive_losses = 0
+    for trade in recent_trades:
+        if trade.profit < 0:
+            consecutive_losses += 1
+        else:
+            break
+
+    if consecutive_losses >= MAX_CONSECUTIVE_LOSSES:
+        return False, (
+            f"策略 {strategy_id} 连续 {consecutive_losses} 笔亏损，"
+            f"超过阈值 {MAX_CONSECUTIVE_LOSSES}，已自动暂停"
+        )
+    return True, ""
+
+
 async def _enhanced_risk_check(user_id: str, symbol: str, side: str,
-                                amount_usdt: float) -> tuple[bool, str]:
-    """主路径：kill_switch → 金额上限 → 白名单 → regime_detector → risk_engine.full_check
+                                amount_usdt: float,
+                                strategy_id: str = "manual",
+                                order_price: float = 0.0,
+                                skip_cold_start: bool = False) -> tuple[bool, str]:
+    """主路径：冷启动 → kill_switch → 金额上限 → 白名单 → 频率检测 → 亏损检测 → 滑点 → regime → risk_engine
 
     手动下单视为 CUSTOM 策略，跳过入场 Sharpe 门槛（sharpe_oos=999）。
     风控引擎异常时默认拒绝（Phase 8: 不再 fallback 到旧 risk_manager）。
     """
+    # 0) v2.0: 冷启动窗口（pytest 运行时自动跳过）
+    if not skip_cold_start and "PYTEST_CURRENT_TEST" not in os.environ:
+        ok, msg = _check_cold_start()
+        if not ok:
+            return False, msg
+
     # 1) 紧急停止
     ok, msg = _check_kill_switch()
     if not ok:
@@ -307,7 +407,30 @@ async def _enhanced_risk_check(user_id: str, symbol: str, side: str,
     if not ok:
         return False, msg
 
-    # 4) 风控引擎（异常默认拒绝）
+    # 4) v2.0: 异常频率检测
+    ok, msg = _check_order_frequency(strategy_id)
+    if not ok:
+        log.warning(f"Order frequency limit: {msg}")
+        return False, msg
+
+    # 5) v2.0: 连续亏损检测
+    if strategy_id != "manual":
+        ok, msg = await _check_consecutive_losses(strategy_id)
+        if not ok:
+            log.warning(f"Consecutive loss limit: {msg}")
+            return False, msg
+
+    # 6) v2.0: 滑点保护（有下单价格时检查）
+    if order_price > 0:
+        try:
+            current_price = (await tick_cache.get(symbol)).get("last", 0)
+            ok, msg = _check_slippage(order_price, current_price)
+            if not ok:
+                return False, msg
+        except Exception:
+            pass  # 无行情数据时放行
+
+    # 7) 风控引擎（异常默认拒绝）
     try:
         regime = await _detect_regime(symbol)
         total_capital = await _get_total_capital()
@@ -364,13 +487,19 @@ async def place_limit_order(user_id: str, symbol: str, side: str,
     - 下单后原子写 orders + audit_logs（本地落库）
     - 支持 account_id 多账户
     """
+    log.info(f"[ORDER_REQUEST] type=LIMIT user={user_id} account={account_id} "
+             f"symbol={symbol} side={side} amount={amount} price={price} "
+             f"usdt={amount * price:.2f} testnet={settings.EXCHANGE_TESTNET}")
+
     # 实盘二次确认
     if not settings.EXCHANGE_TESTNET and not confirm_live:
+        log.warning(f"[ORDER_REJECTED] reason=live_confirm_required symbol={symbol}")
         return None, "实盘模式下单需二次确认（confirm_live=true）", False
 
     amount_usdt = amount * price
     ok, msg = await _enhanced_risk_check(user_id, symbol, side, amount_usdt)
     if not ok:
+        log.warning(f"[ORDER_REJECTED] reason=risk_check symbol={symbol} side={side} msg={msg}")
         return None, msg, False
 
     idempotency_key = _make_idempotency_key(account_id, symbol, side, amount)
@@ -379,7 +508,9 @@ async def place_limit_order(user_id: str, symbol: str, side: str,
         order = await asyncio.to_thread(
             shared_exchange.create_limit_order, symbol, side, amount, price
         )
-        log.info(f"Limit order placed: {side} {amount} {symbol} @ {price} (id={order.get('id')})")
+        log.info(f"[ORDER_PLACED] type=LIMIT id={order.get('id')} symbol={symbol} "
+                 f"side={side} amount={amount} price={order.get('price', price)} "
+                 f"status={order.get('status', 'open')} filled={order.get('filled', 0)}")
 
         # 对账：fetch_order 确认订单真实存在
         if order.get("id"):
@@ -389,22 +520,30 @@ async def place_limit_order(user_id: str, symbol: str, side: str,
                 )
                 if verified:
                     order["verified"] = True
+                    log.info(f"[ORDER_VERIFIED] id={order['id']} "
+                             f"filled={verified.get('filled', 0)} "
+                             f"status={verified.get('status', '?')}")
+                else:
+                    order["verified"] = False
+                    log.warning(f"[ORDER_VERIFY_NULL] id={order['id']} fetch_order returned None")
             except Exception as e:
-                log.warning(f"Order verification failed (non-fatal): {e}")
+                log.warning(f"[ORDER_VERIFY_FAIL] id={order.get('id')} error={e}")
                 order["verified"] = False
 
         # M3: 本地落库（orders + audit_logs 原子写）
         await _record_order_success(
             user_id, account_id, symbol, side, amount, order, OrderType.LIMIT, idempotency_key
         )
+        log.info(f"[ORDER_DONE] type=LIMIT id={order.get('id')} symbol={symbol} "
+                 f"side={side} — order recorded to DB")
 
         return order, None, False
     except ExchangeError as e:
-        log.error(f"Limit order FAILED: {e}")
+        log.error(f"[ORDER_FAILED] type=LIMIT symbol={symbol} side={side} error={e}")
         await _record_order_failure(user_id, account_id, symbol, side, amount, OrderType.LIMIT, idempotency_key, str(e))
         return None, f"限价单下单失败: {e}", False
     except Exception as e:
-        log.error(f"Limit order exception: {e}")
+        log.error(f"[ORDER_EXCEPTION] type=LIMIT symbol={symbol} side={side} error={e}")
         await _record_order_failure(user_id, account_id, symbol, side, amount, OrderType.LIMIT, idempotency_key, str(e))
         return None, f"限价单异常: {e}", False
 
@@ -423,17 +562,23 @@ async def place_market_order(user_id: str, symbol: str, side: str,
     - 下单后原子写 orders + audit_logs（本地落库）
     - 支持 account_id 多账户
     """
+    log.info(f"[ORDER_REQUEST] type=MARKET user={user_id} account={account_id} "
+             f"symbol={symbol} side={side} amount={amount} testnet={settings.EXCHANGE_TESTNET}")
+
     # 实盘二次确认
     if not settings.EXCHANGE_TESTNET and not confirm_live:
+        log.warning(f"[ORDER_REJECTED] reason=live_confirm_required symbol={symbol}")
         return None, "实盘模式下单需二次确认（confirm_live=true）", False
 
     est_price = await _get_price(symbol)
     if est_price <= 0:
+        log.warning(f"[ORDER_REJECTED] reason=no_price symbol={symbol}")
         return None, "无法获取当前价格，拒绝下单", False
 
     amount_usdt = amount * est_price
     ok, msg = await _enhanced_risk_check(user_id, symbol, side, amount_usdt)
     if not ok:
+        log.warning(f"[ORDER_REJECTED] reason=risk_check symbol={symbol} side={side} msg={msg}")
         return None, msg, False
 
     idempotency_key = _make_idempotency_key(account_id, symbol, side, amount)
@@ -442,7 +587,9 @@ async def place_market_order(user_id: str, symbol: str, side: str,
         order = await asyncio.to_thread(
             shared_exchange.create_market_order, symbol, side, amount
         )
-        log.info(f"Market order placed: {side} {amount} {symbol} (id={order.get('id')})")
+        log.info(f"[ORDER_PLACED] type=MARKET id={order.get('id')} symbol={symbol} "
+                 f"side={side} amount={amount} price={order.get('price', 0)} "
+                 f"status={order.get('status', 'closed')} filled={order.get('filled', 0)}")
 
         # 对账
         if order.get("id"):
@@ -452,22 +599,30 @@ async def place_market_order(user_id: str, symbol: str, side: str,
                 )
                 if verified:
                     order["verified"] = True
+                    log.info(f"[ORDER_VERIFIED] id={order['id']} "
+                             f"filled={verified.get('filled', 0)} "
+                             f"status={verified.get('status', '?')}")
+                else:
+                    order["verified"] = False
+                    log.warning(f"[ORDER_VERIFY_NULL] id={order['id']} fetch_order returned None")
             except Exception as e:
-                log.warning(f"Order verification failed (non-fatal): {e}")
+                log.warning(f"[ORDER_VERIFY_FAIL] id={order.get('id')} error={e}")
                 order["verified"] = False
 
         # M3: 本地落库（orders + audit_logs 原子写）
         await _record_order_success(
             user_id, account_id, symbol, side, amount, order, OrderType.MARKET, idempotency_key
         )
+        log.info(f"[ORDER_DONE] type=MARKET id={order.get('id')} symbol={symbol} "
+                 f"side={side} — order recorded to DB")
 
         return order, None, False
     except ExchangeError as e:
-        log.error(f"Market order FAILED: {e}")
+        log.error(f"[ORDER_FAILED] type=MARKET symbol={symbol} side={side} error={e}")
         await _record_order_failure(user_id, account_id, symbol, side, amount, OrderType.MARKET, idempotency_key, str(e))
         return None, f"市价单下单失败: {e}", False
     except Exception as e:
-        log.error(f"Market order exception: {e}")
+        log.error(f"[ORDER_EXCEPTION] type=MARKET symbol={symbol} side={side} error={e}")
         await _record_order_failure(user_id, account_id, symbol, side, amount, OrderType.MARKET, idempotency_key, str(e))
         return None, f"市价单异常: {e}", False
 

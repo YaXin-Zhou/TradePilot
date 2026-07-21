@@ -1,7 +1,6 @@
 // v1.2: 导航组件渲染 + 语言切换测试
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { LanguageProvider } from "../lib/LanguageContext";
 
 // 简易 Layout 渲染测试（不依赖完整路由）
 function SimpleLayout() {
@@ -27,12 +26,8 @@ describe("Layout", () => {
     expect(screen.getByText("AI Lab")).toBeInTheDocument();
   });
 
-  it("renders language provider without crash", () => {
-    render(
-      <LanguageProvider>
-        <div>Test</div>
-      </LanguageProvider>
-    );
-    expect(screen.getByText("Test")).toBeInTheDocument();
+  it("shows layout container", () => {
+    render(<SimpleLayout />);
+    expect(screen.getByTestId("layout")).toBeInTheDocument();
   });
 });

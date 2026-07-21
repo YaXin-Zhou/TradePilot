@@ -1,10 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { api } from "../lib/api";
 import { useLanguage } from "../lib/LanguageContext";
 import {
   Play, BarChart3, TrendingUp, TrendingDown, RefreshCw,
   Activity, Target, DollarSign, Percent, Hash,
   ShieldCheck, ShieldAlert, AlertTriangle, Divide,
+  Clock, CheckCircle, XCircle, Loader2,
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -62,20 +63,58 @@ export default function BacktestPage() {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<Record<string, any> | null>(null);
   const [params, setParams] = useState<BacktestParams>({ fast: 10, slow: 30 });
+  // 异步回测进度
+  const [progress, setProgress] = useState(0);
+  const [progressStage, setProgressStage] = useState("");
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // 清理轮询
+  useEffect(() => {
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
 
   const runBacktest = async () => {
     setRunning(true);
     setResult(null);
+    setProgress(0);
+    setProgressStage("Submitting...");
     try {
-      const data = await api.runBacktest({
+      // 1. 启动异步回测
+      const task = await api.runBacktestAsync({
         strategy, symbol, timeframe, limit: 500, capital,
         position_size: positionSize, trading_fee: tradingFee, slippage, params,
       });
-      setResult(data);
+      const taskId = (task as any).task_id;
+      if (!taskId) throw new Error("No task_id returned");
+
+      // 2. 轮询状态
+      pollRef.current = setInterval(async () => {
+        try {
+          const status = await api.getBacktestStatus(taskId);
+          const st = status as any;
+          setProgress(st.progress ?? 0);
+          setProgressStage(st.stage ?? "");
+
+          if (st.status === "done") {
+            clearInterval(pollRef.current!);
+            pollRef.current = null;
+            // 后端返回 result = {success: true, data: {...}}
+            setResult(st.result?.data ?? st.result);
+            setRunning(false);
+          } else if (st.status === "error") {
+            clearInterval(pollRef.current!);
+            pollRef.current = null;
+            console.error("Backtest error:", st.error);
+            setRunning(false);
+          }
+        } catch {
+          // 轮询失败不中断
+        }
+      }, 1000);
     } catch (e) {
       console.error("Backtest error:", e);
+      setRunning(false);
     }
-    setRunning(false);
   };
 
   const renderParams = () => {
@@ -198,8 +237,29 @@ export default function BacktestPage() {
             </div>
           )}
           {running && (
-            <div className="card flex items-center justify-center py-12">
-              <RefreshCw size={32} className="text-okx-green animate-spin" />
+            <div className="card py-8">
+              <div className="flex flex-col items-center gap-4">
+                <Loader2 size={28} className="text-okx-green animate-spin" />
+                <div className="w-full max-w-xs">
+                  <div className="flex justify-between text-xs text-dark-400 mb-1.5">
+                    <span>{progressStage || (lang === "zh" ? "处理中..." : "Processing...")}</span>
+                    <span>{progress}%</span>
+                  </div>
+                  <div className="w-full h-2 bg-dark-800 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-okx-green rounded-full transition-all duration-500 ease-out"
+                      style={{ width: `${Math.max(progress, 2)}%` }}
+                    />
+                  </div>
+                </div>
+                {progressStage && (
+                  <p className="text-xs text-dark-500">
+                    {lang === "zh"
+                      ? "回测正在后台执行，包含数据获取、策略计算和统计验证"
+                      : "Running backtest in background: data fetch, strategy calc, validation"}
+                  </p>
+                )}
+              </div>
             </div>
           )}
           {result && !running && (

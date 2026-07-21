@@ -116,6 +116,58 @@ async def flush_pending_orders():
         log.debug(f"Pending orders flush failed: {e}")
 
 
+async def system_heartbeat():
+    """系统心跳日志 — 每 60 秒输出系统整体运行状态。
+
+    包含：运行中策略数、持仓数、交易所连接状态、kill_switch 状态、
+    内存队列状态、DB 订单数。便于运维快速判断系统是否健康。
+    """
+    try:
+        from core.exchange import shared_exchange
+        from core.kill_switch import kill_switch
+        from services.trading_service import _pending_order_records
+
+        # 运行中策略 + 持仓
+        running = 0
+        positions = 0
+        try:
+            from strategies.runner import runner
+            running = len(runner._tasks)
+            positions = len(runner._positions_usdt)
+        except Exception:
+            pass
+
+        # 交易所连接状态
+        exchange_ok = shared_exchange._connected if hasattr(shared_exchange, '_connected') else False
+        exchange_name = shared_exchange.name if hasattr(shared_exchange, 'name') else '?'
+
+        # kill_switch
+        ks_status = kill_switch.get_state().get("status", "?")
+
+        # 内存队列
+        pending = len(_pending_order_records)
+
+        # DB 订单数
+        db_orders = -1
+        try:
+            from db.database import async_session
+            from db.models import Order
+            from sqlalchemy import select, func
+            async with async_session() as session:
+                db_orders = await session.scalar(select(func.count(Order.id))) or 0
+        except Exception:
+            pass
+
+        log.info(
+            f"[HEARTBEAT] running_strategies={running} positions={positions} "
+            f"exchange={exchange_name}({'ok' if exchange_ok else 'OFFLINE'}) "
+            f"kill_switch={ks_status} pending_orders={pending} "
+            f"db_orders={db_orders} instance_ok"
+        )
+    except Exception as e:
+        log.warning(f"[HEARTBEAT] failed: {e}")
+
+
 def start_scheduler():
     scheduler.add_job(sync_market_data, IntervalTrigger(hours=1), id="sync_market_data", replace_existing=True)
     scheduler.add_job(retrain_ml_models, IntervalTrigger(hours=24), id="retrain_ml_models", replace_existing=True)
@@ -124,10 +176,13 @@ def start_scheduler():
     scheduler.add_job(refresh_kill_switch, IntervalTrigger(seconds=5), id="refresh_kill_switch", replace_existing=True)
     # P1-2: 订单落库失败补偿（每 30 秒重试内存队列）
     scheduler.add_job(flush_pending_orders, IntervalTrigger(seconds=30), id="flush_pending_orders", replace_existing=True)
+    # 系统心跳日志（每 60 秒输出运行状态）
+    scheduler.add_job(system_heartbeat, IntervalTrigger(seconds=60), id="system_heartbeat", replace_existing=True)
     # Phase 8: 任务执行监听（异常隔离 + 记录）
     scheduler.add_listener(_job_listener, EVENT_JOB_ERROR | EVENT_JOB_EXECUTED)
     scheduler.start()
-    log.info("Scheduler started (market data: 1h, ML retrain: 24h, AI heartbeat: 6h, kill_switch refresh: 5s, pending orders flush: 30s)")
+    log.info("Scheduler started (market data: 1h, ML retrain: 24h, AI heartbeat: 6h, "
+             "kill_switch refresh: 5s, pending orders flush: 30s, system heartbeat: 60s)")
 
 
 def stop_scheduler():

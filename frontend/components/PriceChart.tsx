@@ -10,7 +10,7 @@ interface OHLCVData {
   volume: number;
 }
 
-interface LiveTicker {
+export interface LiveTicker {
   last: number;
   bid: number;
   ask: number;

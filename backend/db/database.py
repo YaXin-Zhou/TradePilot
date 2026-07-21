@@ -59,22 +59,50 @@ async def init_db():
 async def _try_alembic_upgrade() -> bool:
     """N4: 尝试运行 alembic upgrade head
 
-    成功返回 True，失败（alembic 未安装/迁移出错）返回 False 由调用方回退。
+    成功返回 True，失败返回 False 由调用方回退。
     生产部署推荐：先 `alembic upgrade head` 再启动 uvicorn，本函数作为兜底。
+
+    v1.3 fix: 多 worker 并发启动时，用文件锁保证只有一个 worker 执行迁移，
+    其余 worker 等待并跳过（避免 4 个 Alembic 同时跑造成 DB 锁竞争）。
+    锁超时 120s，超时后 worker 回退到 create_all。
     """
+    import fcntl
+    import time as _time
+    from pathlib import Path
+    import sys
+
+    backend_dir = Path(__file__).parent.parent
+    alembic_ini = backend_dir / "alembic.ini"
+    if not alembic_ini.exists():
+        return False
+
+    lock_file = backend_dir / "data" / ".init.lock"
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    lock_fd = open(str(lock_file), "w")
+
+    try:
+        # 非阻塞尝试获取锁 → 如果已有 worker 在迁移，直接跳过
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError):
+        # 另一个 worker 正在执行迁移，等待它完成
+        waited = 0
+        while waited < 120:
+            _time.sleep(1)
+            waited += 1
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except (BlockingIOError, OSError):
+                pass
+        else:
+            # 等待超时，回退到 create_all
+            lock_fd.close()
+            return False
+
     try:
         from alembic.config import Config
         from alembic import command
-        from pathlib import Path
-        import sys
 
-        # alembic.ini 在 backend/ 目录
-        backend_dir = Path(__file__).parent.parent
-        alembic_ini = backend_dir / "alembic.ini"
-        if not alembic_ini.exists():
-            return False
-
-        # 确保 backend 在 sys.path（env.py 需要 import config/db）
         if str(backend_dir) not in sys.path:
             sys.path.insert(0, str(backend_dir))
 
@@ -82,16 +110,16 @@ async def _try_alembic_upgrade() -> bool:
         command.upgrade(alembic_cfg, "head")
         return True
     except ImportError:
-        # alembic 未安装
         return False
     except Exception as e:
-        # 迁移出错（已有表/枚举冲突/连接失败等）
         try:
             from core.logger import log
             log.warning(f"Alembic upgrade failed, falling back to create_all: {e}")
         except ImportError:
             print(f"[init_db] Alembic upgrade failed, falling back to create_all: {e}")
         return False
+    finally:
+        lock_fd.close()
 
 
 def _migrate_orders_table(conn):

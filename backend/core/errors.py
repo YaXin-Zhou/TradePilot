@@ -21,9 +21,9 @@ async def global_error_handler(request: Request, call_next):
         raise
     except Exception as exc:
         # 未预料的异常 — 统一格式化
-        error_detail = str(exc)[:200]
+        error_detail = str(exc)[:500]
         log.error(
-            f"[{trace_id}] Unhandled exception | {request.method} {request.url.path} | {error_detail}\n"
+            f"[{trace_id}] Unhandled exception | {request.method} {request.url.path} | {type(exc).__name__}: {error_detail}\n"
             f"{traceback.format_exc()}"
         )
 
@@ -33,7 +33,7 @@ async def global_error_handler(request: Request, call_next):
             status_code=500,
             content={
                 "success": False,
-                "error": "内部服务器错误",
+                "error": f"内部服务器错误: {safe_detail}"[:200],
                 "trace_id": trace_id,
             },
         )

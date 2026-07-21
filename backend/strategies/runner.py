@@ -463,6 +463,8 @@ class StrategyRunner:
 
     async def _run_loop(self, sid: str, obj):
         log.info(f"StrategyRunner[{sid}]: started for {obj.symbol} (instance={INSTANCE_ID})")
+        _tick_count = 0
+        _last_heartbeat = time.time()
         try:
             while True:
                 try:
@@ -472,13 +474,28 @@ class StrategyRunner:
                     # M4: 续期锁（每个 tick）
                     await self._renew_lock(sid)
                     await self._tick(sid, obj)
+                    _tick_count += 1
+
+                    # 心跳日志：每 60 秒输出一次运行状态
+                    now = time.time()
+                    if now - _last_heartbeat >= 60:
+                        pos_qty = self._positions_qty.get(sid, 0.0)
+                        pos_usdt = self._positions_usdt.get(sid, 0.0)
+                        log.info(
+                            f"[RUNNER_HEARTBEAT] sid={sid} symbol={obj.symbol} "
+                            f"ticks={_tick_count} uptime={int(now - _last_heartbeat + 60)}s "
+                            f"pos_qty={pos_qty:.6f} pos_usdt={pos_usdt:.2f} "
+                            f"instance={INSTANCE_ID}"
+                        )
+                        _last_heartbeat = now
+
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
                     log.error(f"StrategyRunner[{sid}] tick error: {e}")
                 await asyncio.sleep(5)
         except asyncio.CancelledError:
-            log.info(f"StrategyRunner[{sid}]: stopped")
+            log.info(f"StrategyRunner[{sid}]: stopped (ticks={_tick_count})")
             raise
         finally:
             await self._persist_state(sid)
@@ -558,7 +575,7 @@ class StrategyRunner:
             order = await asyncio.to_thread(
                 shared_exchange.create_market_order, obj.symbol, side, order_amount
             )
-            log.info(f"StrategyRunner[{sid}] order: {side} {order_amount:.6f} "
+            log.info(f"[RUNNER_ORDER] sid={sid} {side} {order_amount:.6f} "
                      f"(@{current_price:.2f} = ${order_usdt:.2f}) id={order.get('id')}")
 
             # 对账（fetch_order 校验订单真实存在）
@@ -572,11 +589,12 @@ class StrategyRunner:
                         actual_cost = float(verified.get("cost", 0) or order_usdt)
                         order_amount = actual_filled
                         order_usdt = actual_cost if actual_cost > 0 else order_usdt
-                        log.info(f"StrategyRunner[{sid}] order verified: filled={actual_filled}")
+                        log.info(f"[RUNNER_ORDER_VERIFIED] sid={sid} id={order['id']} "
+                                 f"filled={actual_filled} cost={actual_cost:.2f}")
                     else:
-                        log.warning(f"StrategyRunner[{sid}] order verification returned None")
+                        log.warning(f"[RUNNER_ORDER_VERIFY_NULL] sid={sid} id={order['id']}")
                 except Exception as e:
-                    log.warning(f"StrategyRunner[{sid}] order verify failed (non-fatal): {e}")
+                    log.warning(f"[RUNNER_ORDER_VERIFY_FAIL] sid={sid} id={order.get('id')} err={e}")
 
         except ExchangeError as e:
             log.error(f"StrategyRunner[{sid}] order FAILED: {e}")
@@ -601,19 +619,26 @@ class StrategyRunner:
         # 10. 更新持仓记录 + 持久化（M4: DB）
         self._positions_usdt[sid] = current_position + order_usdt
         self._positions_qty[sid] = self._positions_qty.get(sid, 0.0) + order_amount
+        log.info(f"[RUNNER_POSITION_UPDATE] sid={sid} symbol={obj.symbol} "
+                 f"side={side} qty={self._positions_qty[sid]:.6f} "
+                 f"usdt={self._positions_usdt[sid]:.2f}")
         await self._persist_state(sid)
 
     async def _close_position(self, sid: str, symbol: str, side: str):
         """平仓"""
         qty = self._positions_qty.get(sid, 0.0)
         if qty <= 0:
+            log.warning(f"[RUNNER_CLOSE_SKIP] sid={sid} qty<=0, nothing to close")
             return
         close_side = "sell" if side == "long" else "buy"
+        log.info(f"[RUNNER_CLOSE_START] sid={sid} symbol={symbol} "
+                 f"side={close_side} qty={qty:.6f}")
         try:
             order = await asyncio.to_thread(
                 shared_exchange.create_market_order, symbol, close_side, qty
             )
-            log.info(f"StrategyRunner[{sid}] close position: {close_side} {qty:.6f} id={order.get('id')}")
+            log.info(f"[RUNNER_CLOSE_DONE] sid={sid} id={order.get('id')} "
+                     f"side={close_side} qty={qty:.6f}")
 
             # 对账
             if order.get("id"):
@@ -624,19 +649,22 @@ class StrategyRunner:
                     if verified:
                         actual_filled = float(verified.get("filled", 0) or qty)
                         qty = actual_filled
+                        log.info(f"[RUNNER_CLOSE_VERIFIED] sid={sid} id={order['id']} "
+                                 f"filled={actual_filled:.6f}")
                 except Exception:
                     pass
 
         except ExchangeError as e:
-            log.error(f"StrategyRunner[{sid}] close FAILED: {e}")
+            log.error(f"[RUNNER_CLOSE_FAILED] sid={sid} error={e}")
             return
         except Exception as e:
-            log.error(f"StrategyRunner[{sid}] close exception: {e}")
+            log.error(f"[RUNNER_CLOSE_EXCEPTION] sid={sid} error={e}")
             return
         # 清理状态 + 持久化（M4: DB）
         self._stop_managers.pop(sid, None)
         self._positions_usdt.pop(sid, None)
         self._positions_qty.pop(sid, None)
+        log.info(f"[RUNNER_POSITION_CLEARED] sid={sid} symbol={symbol}")
         await self._persist_state(sid)
 
     def is_running(self, strategy_id: str) -> bool:

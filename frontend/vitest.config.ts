@@ -15,6 +15,7 @@ export default defineConfig({
     css: {
       modules: { classNameStrategy: "non-scoped" },
     },
+    include: ["tests/components/**/*.test.{ts,tsx}"],
   },
   resolve: {
     alias: {
