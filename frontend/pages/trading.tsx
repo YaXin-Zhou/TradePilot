@@ -1,7 +1,16 @@
 import { useState, useEffect } from "react";
 import { api } from "../lib/api";
 import { useLanguage } from "../lib/LanguageContext";
-import { TrendingUp, TrendingDown, AlertCircle, RefreshCw } from "lucide-react";
+import type { ApiResponse } from "../types/api";
+import { TrendingUp, TrendingDown, AlertCircle, RefreshCw, Shield, ChevronDown, ChevronUp, Check } from "lucide-react";
+
+interface ManualRisk {
+  max_order_usdt: number;
+  max_daily_loss_usdt: number;
+  min_order_usdt: number;
+  max_position_usdt: number;
+  enabled: boolean;
+}
 
 export default function TradingPage() {
   const [ticker, setTicker] = useState<Record<string, any> | null>(null);
@@ -12,29 +21,60 @@ export default function TradingPage() {
   const [price, setPrice] = useState("");
   const [status, setStatus] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
+
+  // 手动风控设置
+  const [riskOpen, setRiskOpen] = useState(false);
+  const [risk, setRisk] = useState<ManualRisk>({
+    max_order_usdt: 0, max_daily_loss_usdt: 0,
+    min_order_usdt: 0, max_position_usdt: 0, enabled: false,
+  });
+  const [riskSaving, setRiskSaving] = useState(false);
+  const [riskToast, setRiskToast] = useState("");
+
+  const isZh = lang === "zh";
 
   useEffect(() => {
     api.getTicker().then(setTicker).catch(() => {});
     api.getBalance().then(setBalance).catch(() => {});
     api.getOpenOrders().then(setOrders).catch(() => {});
+    api.getManualRiskSettings().then((r: ApiResponse<ManualRisk>) => {
+      if (r?.success && r.data) setRisk(r.data);
+    }).catch(() => {});
   }, [refreshKey]);
 
   const handleSubmit = async () => {
-    setStatus(t("trade.placing"));
+    setStatus(isZh ? "下单中..." : "Placing...");
     try {
       await api.placeLimitOrder({ symbol: "BTC/USDT", side, amount: parseFloat(amount), price: parseFloat(price || ticker?.last || "0") });
-      setStatus(t("trade.placed"));
+      setStatus(isZh ? "已提交" : "Placed");
       setRefreshKey((k) => k + 1);
     } catch (e: unknown) {
-      setStatus(`${t("trade.orderErr")}: ${e instanceof Error ? e.message : String(e)}`);
+      setStatus(`${isZh ? "错误" : "Error"}: ${e instanceof Error ? e.message : String(e)}`);
     }
+  };
+
+  const saveRisk = async () => {
+    setRiskSaving(true);
+    try {
+      const r: ApiResponse<ManualRisk> = await api.updateManualRiskSettings(risk as unknown as Record<string, unknown>);
+      if (r?.success && r.data) {
+        setRisk(r.data);
+        setRiskToast(isZh ? "风控设置已保存" : "Risk settings saved");
+        setTimeout(() => setRiskToast(""), 2000);
+      }
+    } catch {}
+    setRiskSaving(false);
+  };
+
+  const updateRisk = (key: keyof ManualRisk, val: number | boolean) => {
+    setRisk((prev) => ({ ...prev, [key]: val }));
   };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       {/* Order Form */}
-      <div className="card lg:col-span-1">
+      <div className="card lg:col-span-1 space-y-0">
         <h3 className="text-sm font-semibold text-white mb-4">{t("trade.placeOrder")}</h3>
         <div className="flex rounded-lg overflow-hidden border border-dark-800 mb-4">
           <button
@@ -77,6 +117,92 @@ export default function TradingPage() {
             </div>
           </div>
         )}
+
+        {/* ──── 手动交易风控设置 ──── */}
+        <div className="mt-4 pt-4 border-t border-dark-800">
+          <button
+            onClick={() => setRiskOpen(!riskOpen)}
+            className="flex items-center justify-between w-full text-xs text-dark-400 hover:text-dark-200 transition-colors"
+          >
+            <span className="flex items-center gap-2">
+              <Shield size={14} className={risk.enabled ? "text-yellow-400" : "text-dark-500"} />
+              {isZh ? "手动交易风控" : "Manual Risk Control"}
+              {risk.enabled && (
+                <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
+              )}
+            </span>
+            {riskOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+
+          {riskOpen && (
+            <div className="mt-3 space-y-3 text-xs animate-fadeIn">
+              {/* 启用开关 */}
+              <div className="flex items-center justify-between py-1.5">
+                <span className="text-dark-400">{isZh ? "启用风控" : "Enable Risk"}</span>
+                <button
+                  onClick={() => updateRisk("enabled", !risk.enabled)}
+                  className={`w-9 h-5 rounded-full transition-colors relative ${risk.enabled ? "bg-yellow-500" : "bg-dark-600"}`}
+                >
+                  <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${risk.enabled ? "translate-x-4" : "translate-x-0.5"}`} />
+                </button>
+              </div>
+
+              {risk.enabled && (
+                <>
+                  <div>
+                    <label className="text-dark-500 mb-1 block">
+                      {isZh ? "最大单笔金额 (USDT)" : "Max Order (USDT)"}
+                      <span className="text-dark-600 ml-1">{isZh ? "(0=不限)" : "(0=unlimited)"}</span>
+                    </label>
+                    <input
+                      type="number" min={0} step={100}
+                      value={risk.max_order_usdt || ""}
+                      onChange={(e) => updateRisk("max_order_usdt", parseFloat(e.target.value) || 0)}
+                      className="w-full text-xs py-1.5" placeholder="10000"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-dark-500 mb-1 block">
+                      {isZh ? "最小单笔金额 (USDT)" : "Min Order (USDT)"}
+                      <span className="text-dark-600 ml-1">{isZh ? "(0=不限)" : "(0=unlimited)"}</span>
+                    </label>
+                    <input
+                      type="number" min={0} step={10}
+                      value={risk.min_order_usdt || ""}
+                      onChange={(e) => updateRisk("min_order_usdt", parseFloat(e.target.value) || 0)}
+                      className="w-full text-xs py-1.5" placeholder="10"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-dark-500 mb-1 block">
+                      {isZh ? "日亏损上限 (USDT)" : "Daily Loss Limit (USDT)"}
+                      <span className="text-dark-600 ml-1">{isZh ? "(0=不限)" : "(0=unlimited)"}</span>
+                    </label>
+                    <input
+                      type="number" min={0} step={100}
+                      value={risk.max_daily_loss_usdt || ""}
+                      onChange={(e) => updateRisk("max_daily_loss_usdt", parseFloat(e.target.value) || 0)}
+                      className="w-full text-xs py-1.5" placeholder="500"
+                    />
+                  </div>
+
+                  {riskToast && (
+                    <div className="px-3 py-2 bg-green-500/10 border border-green-500/30 rounded text-green-400 flex items-center gap-1.5">
+                      <Check size={12} /> {riskToast}
+                    </div>
+                  )}
+                  <button
+                    onClick={saveRisk}
+                    disabled={riskSaving}
+                    className="w-full py-2 rounded-lg text-xs font-medium bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 hover:bg-yellow-500/30 transition-all disabled:opacity-50"
+                  >
+                    {riskSaving ? (isZh ? "保存中..." : "Saving...") : (isZh ? "保存风控设置" : "Save Risk Settings")}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Open Orders & Market Info */}

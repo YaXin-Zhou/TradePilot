@@ -20,6 +20,7 @@ from services.trading_service import (
     execute_emergency_stop,
 )
 from core.kill_switch import kill_switch
+from core.logger import log
 
 router = APIRouter(prefix="/api/trading", tags=["trading"])
 
@@ -169,3 +170,67 @@ async def api_emergency_reset(req: EmergencyResetRequest, _user: dict = Depends(
         return {"success": False, "error": "紧急停止未触发，无需解除"}
     state = kill_switch.reset()
     return {"success": True, "data": state}
+
+
+# ------------------------------------------------------------------
+# 手动交易风控设置
+# ------------------------------------------------------------------
+
+class ManualRiskSettings(BaseModel):
+    max_order_usdt: float | None = None
+    max_daily_loss_usdt: float | None = None
+    min_order_usdt: float | None = None
+    max_position_usdt: float | None = None
+    enabled: bool | None = None
+
+
+@router.get("/manual-risk-settings")
+def get_manual_risk_settings(_user: dict = Depends(get_current_user)):
+    """获取手动交易风控设置"""
+    from core.app_config import get_manual_risk
+    return {"success": True, "data": get_manual_risk()}
+
+
+@router.put("/manual-risk-settings")
+async def update_manual_risk_settings(req: ManualRiskSettings, _user: dict = Depends(get_current_user)):
+    """更新手动交易风控设置"""
+    import json
+    from sqlalchemy import text
+    from db.database import async_session
+    from core.app_config import MANUAL_RISK_DEFAULTS
+
+    # 读取当前值
+    current = MANUAL_RISK_DEFAULTS.copy()
+    try:
+        async with async_session() as session:
+            result = await session.execute(
+                text("SELECT value FROM app_config WHERE key = 'manual_risk_settings'")
+            )
+            row = result.fetchone()
+            if row:
+                val = row[0]
+                current = json.loads(val) if isinstance(val, str) else val
+    except Exception as e:
+        log.warning(f"读取手动风控设置失败，使用默认值: {e}")
+
+    # 合并新值
+    current.update({k: v for k, v in req.dict().items() if v is not None})
+    value_json = json.dumps(current, ensure_ascii=False)
+
+    # 写入 DB
+    async with async_session() as session:
+        await session.execute(
+            text("""
+                INSERT INTO app_config (key, value)
+                VALUES ('manual_risk_settings', :value)
+                ON CONFLICT (key) DO UPDATE SET value = :value
+            """),
+            {"value": value_json},
+        )
+        await session.commit()
+
+    # 刷新缓存
+    from core.app_config import refresh_cache
+    refresh_cache("manual_risk_settings")
+
+    return {"success": True, "data": current}

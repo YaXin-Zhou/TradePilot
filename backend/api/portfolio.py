@@ -7,6 +7,9 @@ from services.portfolio_service import (
     get_positions, get_realtime_assets,
 )
 from services.portfolio_allocator import portfolio_allocator
+from services.trading_service import place_market_order
+from core.exchange import shared_exchange
+from core.logger import log
 from auth.deps import get_current_user
 
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
@@ -37,6 +40,64 @@ async def positions():
 async def realtime_assets():
     """获取实时资金概览 — 总资产/浮动盈亏/24h变化/可用余额"""
     return await get_realtime_assets()
+
+
+# ------------------------------------------------------------------
+# 市价平仓
+# ------------------------------------------------------------------
+
+class ClosePositionRequest(BaseModel):
+    asset: str   # 币种代号，如 "BTC"、"ETH"
+    confirm: bool = False  # 必须为 true 才执行
+
+
+@router.post("/close")
+async def close_position(req: ClosePositionRequest, _user: dict = Depends(get_current_user)):
+    """市价平仓：对指定币种的现货持仓下达市价卖单。
+
+    自动获取当前持仓数量，以市价单全部卖出。
+    需 confirm=true 确认执行。
+    """
+    if not req.confirm:
+        return {"success": False, "error": "需 confirm=true 确认平仓操作"}
+
+    asset = req.asset.upper()
+    symbol = f"{asset}/USDT"
+
+    # 获取当前持仓数量
+    try:
+        balance = shared_exchange.fetch_balance()
+        qty = float(balance.get(asset, {}).get("total", 0) or 0)
+        if qty <= 0:
+            return {"success": False, "error": f"无 {asset} 持仓"}
+    except Exception as e:
+        log.error(f"ClosePosition: fetch_balance failed for {asset}: {e}")
+        return {"success": False, "error": f"获取持仓失败: {e}"}
+
+    # 下达市价卖单
+    order, error, _ = await place_market_order(
+        user_id=_user.get("id", "system"),
+        symbol=symbol,
+        side="sell",
+        amount=qty,
+        confirm_live=False,
+        account_id="default",
+        source="manual",
+    )
+    if error:
+        return {"success": False, "error": f"平仓失败: {error}"}
+
+    log.info(f"ClosePosition: {asset} x{qty} sold at market, order={order.get('id') if order else 'N/A'}")
+
+    return {
+        "success": True,
+        "data": {
+            "asset": asset,
+            "symbol": symbol,
+            "quantity": qty,
+            "order": order,
+        },
+    }
 
 
 # ------------------------------------------------------------------

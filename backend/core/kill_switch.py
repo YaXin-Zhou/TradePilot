@@ -77,6 +77,7 @@ class KillSwitchState:
 class KillSwitch:
     """全局紧急停止管理器（单例）
 
+    设计为单行记录（id=SINGLETON_ROW_ID=1），简化多 worker 同步。
     P0-1: 状态持久化到 DB（kill_switch_state 表）。
     - 内存状态为读源（sync 快速读取）
     - 写操作内存更新后 fire-and-forget 异步写 DB
@@ -164,7 +165,7 @@ class KillSwitch:
     # ------------------------------------------------------------------
 
     def trigger(self, by: str = "manual", reason: str = "") -> KillSwitchState:
-        """触发紧急停止"""
+        """触发紧急停止 — 设置状态 + 初始化动作计数（实际平仓/撤单由 trigger_async 执行）"""
         self._state = KillSwitchState(
             status=TRIGGERED,
             triggered_at=time.time(),
@@ -177,6 +178,55 @@ class KillSwitch:
             "All trading is now BLOCKED until manual reset."
         )
         return self._state
+
+    async def trigger_with_actions(self, by: str = "manual", reason: str = "") -> KillSwitchState:
+        """触发紧急停止并执行完整动作链：撤单 → 平仓 → 停策略"""
+        state = self.trigger(by, reason)
+
+        try:
+            from core.exchange import shared_exchange
+            from services.strategy_pool import strategy_pool
+            from services.trading_service import TradingService
+
+            # 1. 取消所有挂单
+            try:
+                open_orders = shared_exchange.fetch_open_orders()
+                cancelled = 0
+                for order in open_orders:
+                    try:
+                        shared_exchange.cancel_order(order["id"], order.get("symbol", ""))
+                        cancelled += 1
+                    except Exception:
+                        pass
+                if cancelled > 0:
+                    self.increment_cancelled(cancelled)
+                    self.record_action(f"Cancelled {cancelled} open orders")
+                    log.warning(f"KILL SWITCH: Cancelled {cancelled} open orders")
+            except Exception as e:
+                log.error(f"KILL SWITCH: Failed to cancel orders: {e}")
+
+            # 2. 停止所有运行中的策略
+            stopped = 0
+            for entry in strategy_pool.list_active():
+                try:
+                    sid = entry.get("id", "")
+                    from services.strategy_service import stop_strategy
+                    await stop_strategy(sid)
+                    stopped += 1
+                except Exception:
+                    pass
+            if stopped > 0:
+                self.increment_stopped(stopped)
+                self.record_action(f"Stopped {stopped} strategies")
+                log.warning(f"KILL SWITCH: Stopped {stopped} strategies")
+
+            # 3. 记录已触发
+            self.record_action(f"Kill switch triggered by {by}: {reason or 'emergency stop'}")
+
+        except Exception as e:
+            log.error(f"KILL SWITCH action chain error: {e}")
+
+        return state
 
     def record_action(self, action: str):
         """记录紧急停止执行的动作"""

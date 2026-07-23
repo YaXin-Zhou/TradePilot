@@ -57,23 +57,23 @@ async def get_metrics():
         from strategies.runner import runner
         metrics["persist_fail_count"] = dict(runner._persist_fail_count)
         metrics["active_strategies"] = len(runner._tasks)
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning(f"获取策略运行状态失败: {e}")
 
     # 3. tick_cache 大小
     try:
         from core.tick_cache import tick_cache
         cache = getattr(tick_cache, "_cache", {})
         metrics["tick_cache_size"] = len(cache)
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning(f"获取tick缓存大小失败: {e}")
 
     # 4. 最近 5 分钟错误数（从 logger 内存计数，best effort）
     try:
         error_count = getattr(log, "_recent_error_count", 0)
         metrics["recent_errors"] = error_count
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning(f"获取最近错误计数失败: {e}")
 
     # v1.2: 同步到 Prometheus Gauge
     _sync_prometheus(metrics)
@@ -98,8 +98,8 @@ def _sync_prometheus(metrics: dict):
         _tc_gauge.set(metrics.get("tick_cache_size", 0))
         _up_gauge.set(metrics.get("uptime_seconds", 0))
         _be_gauge.set(1)
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning(f"同步Prometheus指标失败: {e}")
 
 
 @router.get("/api/metrics/prometheus")

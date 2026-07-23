@@ -305,38 +305,93 @@ async def _call_deepseek(prompt: str, system_prompt: str, max_tokens: int = 2000
             },
         )
         resp.raise_for_status()
-        data = resp.json()
+        content_type = resp.headers.get("content-type", "")
+        if "text/html" in content_type:
+            raise RuntimeError(f"DeepSeek returned HTML error (status={resp.status_code}): {resp.text[:200]}")
+        try:
+            data = resp.json()
+        except Exception:
+            raise RuntimeError(f"DeepSeek returned non-JSON response: {resp.text[:200]}")
         return data["choices"][0]["message"]["content"]
 
 
 def _parse_variants(content: str) -> list[dict]:
-    """解析 AI 输出为 variant 列表"""
-    # 提取 JSON 数组
-    m = re.search(r"\[.*\]", content, re.DOTALL)
-    if not m:
-        log.warning(f"Failed to extract JSON array from AI response: {content[:200]}")
-        return []
+    """解析 AI 输出为 variant 列表（兼容多种格式）"""
+    log.info(f"AI raw response ({len(content)} chars)")
 
+    # 1. 尝试提取 markdown 代码块中的 JSON
+    m = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", content, re.DOTALL)
+    if m:
+        try:
+            variants = json.loads(m.group(1))
+            result = _validate_variants(variants)
+            if result: return result
+        except Exception as e:
+            log.warning(f"Failed to parse markdown block: {e}")
+
+    # 2. 尝试提取裸 JSON 数组（贪婪匹配最后一个最完整的数组）
+    arrays = re.findall(r"\[[\s\S]*?\]", content)
+    for arr_str in reversed(arrays):  # 最后面的数组往往是完整的
+        try:
+            variants = json.loads(arr_str)
+            result = _validate_variants(variants)
+            if result:
+                log.info(f"Parsed {len(result)} variants from bare array")
+                return result
+        except Exception:
+            continue
+
+    # 3. 尝试 {"variants": [...]} 或 {"strategies": [...]} 格式
+    for key in ("variants", "strategies"):
+        m = re.search(r'"' + key + r'"\s*:\s*(\[[\s\S]*?\])', content)
+        if m:
+            try:
+                result = _validate_variants(json.loads(m.group(1)))
+                if result: return result
+            except json.JSONDecodeError as e:
+                log.warning(f"Failed to parse {key} array: {e}")
+            except Exception as e:
+                log.warning(f"Unexpected error parsing {key}: {e}")
+
+    # 4. 最后兜底：整个响应就是 JSON
     try:
-        variants = json.loads(m.group())
-        if not isinstance(variants, list):
-            return []
-        result = []
-        for item in variants:
-            if not isinstance(item, dict):
-                continue
-            st = item.get("strategy_type", "")
-            if st not in ("ma_crossover", "rsi", "bollinger"):
-                continue
-            result.append(StrategyVariant(
-                strategy_type=st,
-                params=item.get("params", {}),
-                rationale=item.get("rationale", ""),
-            ).to_dict())
-        return result
-    except json.JSONDecodeError as e:
-        log.warning(f"JSON parse error in AI response: {e}")
+        data = json.loads(content)
+        if isinstance(data, list):
+            result = _validate_variants(data)
+            if result: return result
+        if isinstance(data, dict):
+            for v in data.values():
+                if isinstance(v, list):
+                    result = _validate_variants(v)
+                    if result: return result
+    except json.JSONDecodeError:
+        log.warning("Entire AI response is not valid JSON for fallback parsing")
+    except Exception as e:
+        log.warning(f"Unexpected error in fallback JSON parse: {e}")
+
+    log.warning(f"Failed to parse variants from AI response. Content preview: {content[:300]}")
+    return []
+
+
+def _validate_variants(items: list) -> list[dict]:
+    """过滤有效变体"""
+    if not isinstance(items, list):
         return []
+    result = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        st = item.get("strategy_type", "").lower()
+        if st in ("ma_crossover", "rsi", "bollinger", "ma_cross"):
+            if st == "ma_cross":
+                item["strategy_type"] = "ma_crossover"
+            result.append(item)
+    return result
+
+
+# ------------------------------------------------------------------
+# 回测执行与收敛检测
+# ------------------------------------------------------------------
 
 
 # ─── 回测执行 ──────────────────────────────────────────────────
@@ -346,11 +401,25 @@ def _run_single_backtest(variant: dict, ohlcv_df, capital: float, task_id: str, 
     v = dict(variant)
     try:
         _increment_attempts()
+        # 参数归一化：兼容 AI 返回的非标准命名
+        normalized_params = dict(v["params"])
+        if v["strategy_type"] == "rsi":
+            if "rsi_period" in normalized_params:
+                normalized_params.setdefault("period", normalized_params.pop("rsi_period"))
+            if "oversold_threshold" in normalized_params:
+                normalized_params.setdefault("oversold", normalized_params.pop("oversold_threshold"))
+            if "overbought_threshold" in normalized_params:
+                normalized_params.setdefault("overbought", normalized_params.pop("overbought_threshold"))
+        elif v["strategy_type"] in ("ma_crossover", "ma_cross"):
+            if "fast_period" in normalized_params:
+                normalized_params.setdefault("fast", normalized_params.pop("fast_period"))
+            if "slow_period" in normalized_params:
+                normalized_params.setdefault("slow", normalized_params.pop("slow_period"))
         result = run_backtest(
             ohlcv_df=ohlcv_df,
             strategy_type=v["strategy_type"],
             capital=capital,
-            params=v["params"],
+            params=normalized_params,
             with_validation=True,
         )
         # 基础指标
@@ -538,6 +607,28 @@ def _build_generation_prompt(
     return "\n".join(parts)
 
 
+def _generate_random_variants(count: int) -> list[dict]:
+    """确定性回退：在合理参数范围内随机生成变体，不依赖 AI"""
+    import random
+    types = random.choices(["ma_crossover", "rsi", "bollinger"], k=count)
+    variants = []
+    for st in types:
+        if st == "ma_crossover":
+            fast = random.randint(5, 25)
+            slow = random.randint(fast + 5, min(fast + 100, 200))
+            variants.append({"strategy_type": st, "params": {"fast": fast, "slow": slow}, "rationale": "Random MA crossover search"})
+        elif st == "rsi":
+            period = random.randint(7, 21)
+            oversold = random.randint(20, 40)
+            overbought = random.randint(60, 80)
+            variants.append({"strategy_type": st, "params": {"period": period, "oversold": oversold, "overbought": overbought}, "rationale": "Random RSI search"})
+        elif st == "bollinger":
+            period = random.randint(10, 30)
+            std_dev = round(random.uniform(1.5, 3.0), 1)
+            variants.append({"strategy_type": st, "params": {"period": period, "std_dev": std_dev}, "rationale": "Random Bollinger search"})
+    return variants
+
+
 # ─── 主循环 ────────────────────────────────────────────────────
 
 async def _run_round(
@@ -569,23 +660,25 @@ async def _run_round(
     prompt = _build_generation_prompt(goal, market, risk, variants_count, top_k)
     system_prompt = FEEDBACK_SYSTEM_PROMPT if top_k else ITERATOR_SYSTEM_PROMPT
 
-    # 3. 调用 AI 生成
+    # 3. 调用 AI 生成（失败时回退到随机参数搜索）
+    variants_raw: list[dict] = []
+    ai_used = False
     try:
         content = await _call_deepseek(prompt, system_prompt, max_tokens=3000)
         variants_raw = _parse_variants(content)
-        if not variants_raw:
-            rd.status = "failed"
-            rd.error = "AI generated 0 valid variants"
-            return rd.to_dict()
+        ai_used = bool(variants_raw)
     except Exception as e:
-        rd.status = "failed"
-        rd.error = f"AI generation failed: {str(e)[:200]}"
-        log.error(f"Iteration {task_id} AI error: {e}")
-        return rd.to_dict()
+        log.warning(f"Iteration {task_id} AI call failed ({e}), falling back to random search")
 
+    if not variants_raw:
+        # 确定性回退：在合理参数范围内随机搜索
+        variants_raw = _generate_random_variants(variants_count)
+        log.info(f"Iteration {task_id} round {round_num}: AI failed, using {len(variants_raw)} random variants")
+    else:
+        log.info(f"Iteration {task_id} round {round_num}: AI generated {len(variants_raw)} variants")
+    
     # 限制数量
     variants_raw = variants_raw[:variants_count]
-    log.info(f"Iteration {task_id} round {round_num}: AI generated {len(variants_raw)} variants, backtesting...")
 
     # 4. 获取回测数据
     df, _ = fetch_ohlcv(symbol, timeframe, 500)
@@ -624,9 +717,11 @@ async def start_iteration(
     max_rounds: int = 5,
     risk_constraints: dict | None = None,
     capital: float = 10000,
+    task_id: str | None = None,
 ) -> str:
     """启动迭代任务，返回 task_id"""
-    task_id = f"iter_{int(time.time() * 1000)}"
+    if task_id is None:
+        task_id = f"iter_{int(time.time() * 1000)}"
     risk = risk_constraints or {"max_drawdown_pct": 20, "min_sharpe": 0.8, "max_concentration": 0.3}
 
     task = IterationTask(
@@ -687,6 +782,16 @@ async def start_iteration(
 
             task.rounds.append(rd)
             task.current_round = r
+
+            # 本轮失败 → 立即终止，不再继续后续轮次
+            if rd.get("status") == "failed":
+                task.status = "failed"
+                task.error = rd.get("error", f"Round {r} failed")[:500]
+                task.completed_at = time.strftime("%Y-%m-%d %H:%M:%S")
+                log.error(f"Iteration {task_id} round {r} failed: {task.error}")
+                await save_progress()
+                return task_id
+
             task.total_variants += len(rd.get("variants", []))
             task.scientific_passed += sum(
                 1 for v in rd.get("variants", []) if v.get("scientific_passed")

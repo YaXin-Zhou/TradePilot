@@ -30,7 +30,7 @@ class Settings:
     # 服务器
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8000"))
-    DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
+    DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
 
     # Redis（v1.2: rate_limiter + 缓存）
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://redis:6379/0")

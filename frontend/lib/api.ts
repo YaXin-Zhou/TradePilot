@@ -13,7 +13,7 @@ async function getToast() {
 // 防止 401 时重复跳转 /login（多个并发请求同时收到 401 会触发多次跳转 → 闪烁）
 let _isRedirectingToLogin = false;
 
-async function request(path: string, options?: RequestInit, timeoutMs: number = 8000) {
+async function request(path: string, options?: RequestInit, timeoutMs: number = 15000) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   const mergedOpts = { ...options, signal: options?.signal || controller.signal };
@@ -102,12 +102,22 @@ export const api = {
       body: JSON.stringify({ confirm }),
     }),
 
+  // Manual Risk Settings
+  getManualRiskSettings: () => request("/api/trading/manual-risk-settings"),
+  updateManualRiskSettings: (data: Record<string, unknown>) =>
+    request("/api/trading/manual-risk-settings", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
   // Portfolio
   getPortfolioSummary: () => request("/api/portfolio/summary"),
   getTradeHistory: (limit = 100) => request(`/api/portfolio/trades?limit=${limit}`),
   getPerformance: () => request("/api/portfolio/performance"),
   getPositions: () => request("/api/portfolio/positions"),
   getRealtimeAssets: () => request("/api/portfolio/realtime"),
+  closePosition: (asset: string, confirm: boolean = false) =>
+    request("/api/portfolio/close", { method: "POST", body: JSON.stringify({ asset, confirm }) }),
 
   // Strategies
   listStrategies: () => request("/api/strategies/"),
@@ -128,19 +138,28 @@ export const api = {
     request(`/api/strategies/${id}/stop`, { method: "POST" }),
   deleteStrategy: (id: string) =>
     request(`/api/strategies/${id}`, { method: "DELETE" }),
+  getStrategyLogs: (id: string, limit = 100) =>
+    request(`/api/strategies/${id}/logs?limit=${limit}`),
+  batchDeleteStrategies: (ids: string[], confirm = false) =>
+    request("/api/strategies/warehouse/batch-delete", {
+      method: "POST",
+      body: JSON.stringify({ strategy_ids: ids, confirm }),
+    }),
+  autoCleanupWarehouse: () =>
+    request("/api/strategies/warehouse/cleanup", { method: "POST" }),
 
 
-  // AI Strategy (API Key 由后端管理，前端不再传入)
+  // AI Strategy — 超时增加到 120s（需调用 DeepSeek + 回测验证）
   aiAnalyze: (data: { strategy_desc: string; symbol?: string; timeframe?: string; auto?: boolean }) =>
     request("/api/ai/analyze", {
       method: "POST",
       body: JSON.stringify(data),
-    }),
+    }, 120000),
   testAIConnection: () =>
     request("/api/ai/test-connection", {
       method: "POST",
       body: JSON.stringify({}),
-    }),
+    }, 30000),
   // Analysis
   getIndicators: (symbol = "BTC/USDT", timeframe = "1h") =>
     request(`/api/analysis/indicators?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}`),
@@ -191,15 +210,17 @@ export const api = {
   clearBacktestHistory: () => request("/api/backtest/history/clear", { method: "POST" }),
   getBacktestStats: () => request("/api/backtest/stats"),
 
-  // AI Iteration
+  // AI Iteration — 超时 60s
   startIteration: (data: { goal: string; symbol?: string; timeframe?: string; variants?: number; max_rounds?: number; capital?: number; risk_constraints?: Record<string, unknown> }) =>
-    request("/api/ai/iterate", { method: "POST", body: JSON.stringify(data) }),
+    request("/api/ai/iterate", { method: "POST", body: JSON.stringify(data) }, 60000),
   getIterationStatus: (taskId: string) =>
-    request(`/api/ai/iterate/status/${taskId}`),
+    request(`/api/ai/iterate/status/${taskId}`, undefined, 15000),
   getIterationBest: (taskId: string) =>
-    request(`/api/ai/iterate/best/${taskId}`),
+    request(`/api/ai/iterate/best/${taskId}`, undefined, 15000),
   listIterationTasks: (limit = 20) =>
-    request(`/api/ai/iterate/tasks?limit=${limit}`),
+    request(`/api/ai/iterate/tasks?limit=${limit}`, undefined, 15000),
+  saveIterationToWarehouse: (data: { strategy_type: string; params: Record<string, unknown>; symbol: string; metrics: Record<string, unknown> }) =>
+    request("/api/ai/iterate/save-to-warehouse", { method: "POST", body: JSON.stringify(data) }),
   // Settings (双套配置：模拟盘 + 实盘)
   getExchangeSettings: () => request("/api/settings/exchange"),
   saveExchangeSettings: (data: { mode: "testnet" | "live"; api_key: string; secret: string; passphrase: string; verify_permissions?: boolean }) =>

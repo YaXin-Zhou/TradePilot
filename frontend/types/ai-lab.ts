@@ -11,6 +11,7 @@ export type IterationStatus =
   | "generating"
   | "backtesting"
   | "completed"
+  | "converged"
   | "done"
   | "failed";
 

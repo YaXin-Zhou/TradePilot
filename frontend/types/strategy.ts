@@ -88,5 +88,16 @@ export interface AiAnalyzeResult {
   strategy_id?: string;
   /** 是否已注册到策略池 */
   pool_registered?: boolean;
+  /** 过拟合验证结果 */
+  validation?: {
+    sharpe_oos?: number;
+    pbo?: number;
+    dsr?: number;
+    scientific_passed?: boolean;
+  };
+  /** 是否通过科学验证（PBO≤0.5 且 OOS夏普>0） */
+  scientific_valid?: boolean;
+  /** 是否因为验证未通过而跳过自动入库 */
+  auto_save_skipped?: boolean;
   error?: string;
 }

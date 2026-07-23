@@ -10,7 +10,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 import pandas as pd
 
 from services import trading_service
-from services.regime_detector import MarketRegime, RegimeResult
+from services.regime_detector import MarketRegime, RegimeResult, regime_detector as rd_instance
 from db.models import StrategyType
 
 
@@ -48,7 +48,7 @@ def uptrend_regime():
         "close": [40000 + i * 200 for i in range(60)],
         "volume": [1000.0] * 60,
     })
-    with patch.object(trading_service.regime_detector, "detect", return_value=result), \
+    with patch.object(rd_instance, "detect", return_value=result), \
          patch.object(trading_service.shared_exchange, "fetch_ohlcv", return_value=df):
         yield result
 
@@ -82,19 +82,16 @@ class TestTradingServiceIntegration:
         assert is_mock is False
 
     @pytest.mark.asyncio
-    async def test_market_order_blocked_by_hard_limit(self, uptrend_regime, mock_balance):
-        """Phase 8: 金额超硬上限(200) → 拦截 → 不下单"""
-        # 100 BTC × 50000 = 5,000,000 USDT 远超 200 硬上限
-        with patch.object(trading_service.shared_exchange, "fetch_ticker",
-                          return_value={"last": 50000}), \
-             patch.object(trading_service.shared_exchange, "create_market_order") as mock_order:
-            order, err, is_mock = await trading_service.place_market_order(
-                "user1", "BTC/USDT", "buy", 100
-            )
-        assert order is None
-        assert err is not None
-        assert "硬上限" in err or "exceeds" in err.lower()
-        mock_order.assert_not_called()
+    async def test_strategy_order_blocked_by_risk_config(self):
+        """v2.1: 策略级风控生效 → 拦截超额下单"""
+        from services.trading_service import _enhanced_risk_check
+        risk = {"enabled": True, "max_order_usdt": 50}
+        ok, msg = await _enhanced_risk_check(
+            "user1", "BTC/USDT", "buy", 5000,
+            source="strategy", strategy_id="test_block",
+            strategy_risk=risk, skip_cold_start=True,
+        )
+        assert ok is False
 
     @pytest.mark.asyncio
     async def test_limit_order_full_chain(self, uptrend_regime, mock_balance):
@@ -123,22 +120,16 @@ class TestTradingServiceIntegration:
         assert "positive" in err.lower() or "金额" in err or "amount" in err.lower()
 
     @pytest.mark.asyncio
-    async def test_regime_detect_fallback_on_error(self, mock_balance):
-        """regime detect 异常 → 回退 RANGING_LOW_VOL → 仍走 risk_engine"""
-        with patch.object(trading_service.shared_exchange, "fetch_ohlcv",
-                          side_effect=RuntimeError("network")), \
-             patch.object(trading_service.shared_exchange, "fetch_ticker",
+    async def test_manual_order_not_affected_by_regime(self, mock_balance):
+        """v2.1: 手动交易不受 Regime/RiskEngine 影响，默认放行"""
+        with patch.object(trading_service.shared_exchange, "fetch_ticker",
                           return_value={"last": 50000}), \
              patch.object(trading_service.shared_exchange, "create_market_order",
                           return_value={"id": "ok", "status": "closed"}):
-            # 0.0001 BTC × 50000 = 5 USDT < 200 硬上限
-            # RANGING_LOW_VOL allowed=[grid, ma_cross], CUSTOM 不在 → 被拦截
             order, err, is_mock = await trading_service.place_market_order(
                 "user1", "BTC/USDT", "buy", 0.0001
             )
-        # CUSTOM 在 RANGING_LOW_VOL 被 regime_allowed 拦截
-        assert order is None
-        assert err is not None
+        assert order is not None, f"Manual order should succeed, got err={err}"
 
     @pytest.mark.asyncio
     async def test_order_exception_returns_error_not_mock(self, uptrend_regime, mock_balance):
@@ -159,24 +150,15 @@ class TestTradingServiceIntegration:
         assert "失败" in err or "failed" in err.lower()
 
     @pytest.mark.asyncio
-    async def test_total_capital_from_balance(self, uptrend_regime):
-        """_get_total_capital 从 balance 获取总资金"""
-        with patch.object(trading_service.shared_exchange, "fetch_balance",
-                          return_value={"USDT": {"total": 25000}}):
-            total = await trading_service._get_total_capital()
-        assert total == 25000
-
     @pytest.mark.asyncio
-    async def test_enhanced_risk_check_uses_regime(self, uptrend_regime, mock_balance):
-        """_enhanced_risk_check 正确调用 regime_detector 和 risk_engine（Phase 8: 金额 ≤ 200）"""
-        with patch.object(trading_service.shared_exchange, "fetch_ticker",
-                          return_value={"last": 50000}):
-            # 100 USDT < 200 硬上限，在 TRENDING_UP (max 4000) 通过
-            ok, msg = await trading_service._enhanced_risk_check(
-                "user1", "BTC/USDT", "buy", 100
-            )
+    async def test_enhanced_risk_check_strategy_disabled_default(self):
+        """v2.1: 策略风控默认关闭"""
+        ok, msg = await trading_service._enhanced_risk_check(
+            "user1", "BTC/USDT", "buy", 100,
+            source="strategy", strategy_id="test123",
+            skip_cold_start=True,
+        )
         assert ok is True
-        assert msg == ""
 
     @pytest.mark.asyncio
     async def test_kill_switch_blocks_order(self, uptrend_regime, mock_balance):

@@ -60,20 +60,85 @@ async def ai_iterate(req: IterateRequest, background_tasks: BackgroundTasks):
     if req.max_rounds < 1 or req.max_rounds > 10:
         return {"success": False, "error": "max_rounds must be 1-10"}
 
+    import time, json
+    from sqlalchemy import text
+    from db.database import async_session
+
+    task_id = f"iter_{int(time.time() * 1000)}"
+
+    # 先同步写入任务记录（前端立即轮询不会丢）
+    try:
+        async with async_session() as session:
+            await session.execute(
+                text("""
+                    INSERT INTO iteration_tasks (task_id, status, goal, symbol, timeframe,
+                        max_rounds, current_round, total_variants, scientific_passed,
+                        created_at, updated_at)
+                    VALUES (:tid, 'pending', :goal, :sym, :tf, :mr, 0, 0, 0, now(), now())
+                """),
+                {"tid": task_id, "goal": req.goal.strip(), "sym": req.symbol,
+                 "tf": req.timeframe, "mr": req.max_rounds},
+            )
+            await session.commit()
+    except Exception as e:
+        from core.logger import log
+        log.error(f"Failed to create iteration task record: {e}")
+
     # 后台启动迭代
-    background_tasks.add_task(
-        asyncio.create_task,
-        start_iteration(
-            goal=req.goal.strip(),
-            symbol=req.symbol,
-            timeframe=req.timeframe,
-            variants=req.variants,
-            max_rounds=req.max_rounds,
-            risk_constraints=req.risk_constraints,
-            capital=req.capital,
-        ),
+    risk = req.risk_constraints or {"max_drawdown_pct": 20, "min_sharpe": 0.8, "max_concentration": 0.3}
+
+    # 后台启动迭代
+    async def _run_iteration():
+        try:
+            await start_iteration(
+                task_id=task_id,
+                goal=req.goal.strip(),
+                symbol=req.symbol,
+                timeframe=req.timeframe,
+                variants=req.variants,
+                max_rounds=req.max_rounds,
+                risk_constraints=risk,
+                capital=req.capital,
+            )
+        except Exception as e:
+            import traceback
+            from core.logger import log
+            log.error(f"Iteration background task failed: {e}\n{traceback.format_exc()}")
+
+    background_tasks.add_task(_run_iteration)
+    return {"success": True, "data": {"task_id": task_id, "goal": req.goal}}
+
+
+class SaveToWarehouseRequest(BaseModel):
+    strategy_type: str
+    params: dict
+    symbol: str = "BTC/USDT"
+    metrics: dict = {}  # {sharpe_oos, max_drawdown_pct, win_rate, total_trades, ...}
+
+@router.post("/iterate/save-to-warehouse")
+async def save_iteration_to_warehouse(req: SaveToWarehouseRequest, _user: dict = Depends(get_current_user)):
+    """将迭代产出的达标策略手动保存到策略库"""
+    from datetime import datetime
+    from services.strategy_service import save_ai_strategy
+    from services.strategy_pool import strategy_pool
+
+    auto_name = f"Iter-{req.strategy_type}-{req.symbol.replace('/', '')}-{datetime.now().strftime('%m%d%H%M')}"
+    backtest = {
+        "sharpe_ratio": req.metrics.get("sharpe_oos", 0),
+        "max_drawdown_pct": req.metrics.get("max_drawdown_pct", 0),
+        "win_rate": req.metrics.get("win_rate", 0),
+        "total_trades": req.metrics.get("total_trades", 0),
+        "total_return_pct": req.metrics.get("total_return_pct", 0),
+    }
+    result = await save_ai_strategy(
+        name=auto_name, strategy_type=req.strategy_type, symbol=req.symbol,
+        config=req.params, backtest=backtest, user_id=_user.get("id", ""),
     )
-    return {"success": True, "message": "Iteration task started", "data": {"goal": req.goal}}
+    if result.get("success"):
+        sid = result["data"]["id"]
+        strategy_pool.register(sid, auto_name, req.strategy_type)
+        return {"success": True, "data": {"strategy_id": sid, "name": auto_name}}
+    return result
 
 
 @router.get("/iterate/status/{task_id}")

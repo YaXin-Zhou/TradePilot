@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useRouter } from "next/router";
 import {
   LayoutDashboard, TrendingUp, BarChart3, Settings,
-  Activity, Wallet, LineChart, Menu, X, ChevronDown, Languages, LogIn, LogOut, FlaskConical, Shield, Layers, AlertOctagon, Briefcase
+  Activity, Wallet, LineChart, Menu, X, ChevronDown, Languages, LogIn, LogOut, FlaskConical, Shield, AlertOctagon, Briefcase
 } from "lucide-react";
 import { getToken, clearToken, api } from "../lib/api"
 import { useLanguage } from "../lib/LanguageContext";
@@ -20,10 +20,7 @@ const NAV_ITEMS = [
   { label: "nav.analysis", icon: Activity, href: "/analysis", color: "#a855f7" },
  { label: "nav.wallet", icon: Wallet, href: "/wallet", color: "#848e9c" },
   { label: "nav.aiFactory", icon: Activity, href: "/ai-factory", color: "#6366f1" },
-  { label: "nav.aiLab", icon: FlaskConical, href: "/ai-lab", color: "#06b6d4" },
-  { label: "nav.risk", icon: Shield, href: "/settings/risk", color: "#f0b90b" },
-  { label: "nav.pool", icon: Layers, href: "/pool", color: "#a855f7" },
- { label: "nav.settings", icon: Settings, href: "/settings", color: "#848e9c" },
+  { label: "nav.settings", icon: Settings, href: "/settings", color: "#848e9c" },
 ];
 
 export default function Layout({ children }: { children: React.ReactNode }) {

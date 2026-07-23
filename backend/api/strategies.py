@@ -1,5 +1,5 @@
 """策略管理 API — 薄层：参数校验 → 调用 service → 构造响应"""
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from typing import Optional
 
@@ -16,6 +16,7 @@ from services.strategy_service import (
 )
 from services.strategy_pool import strategy_pool, StrategyStatus as PoolStatus
 from services.online_learner import online_learner
+from services.strategy_log import get_logs
 
 router = APIRouter(prefix="/api/strategies", tags=["strategies"])
 
@@ -66,6 +67,59 @@ async def api_stop_strategy(strategy_id: str, _user: dict = Depends(get_current_
 async def api_delete_strategy(strategy_id: str, _user: dict = Depends(get_current_user)):
     return await delete_strategy(strategy_id)
 
+
+# ------------------------------------------------------------------
+# 策略仓库管理：批量删除 + 自动清理
+# ------------------------------------------------------------------
+
+class BatchDeleteRequest(BaseModel):
+    strategy_ids: list[str]
+    confirm: bool = False  # 必须为 true 才执行
+
+@router.post("/warehouse/cleanup")
+async def api_auto_cleanup(_user: dict = Depends(get_current_user)):
+    """自动清理垃圾策略：
+    - 休眠超过30天且胜率<30%
+    - 已被策略池淘汰（status=ELIMINATED）超过14天
+    - 夏普<0 且创建超过7天且从未启动过
+    """
+    from services.strategy_service import auto_cleanup_strategies
+    result = await auto_cleanup_strategies()
+    return {"success": True, "data": result}
+
+@router.post("/warehouse/batch-delete")
+async def api_batch_delete(req: BatchDeleteRequest, _user: dict = Depends(get_current_user)):
+    """批量删除策略"""
+    if not req.confirm:
+        return {"success": False, "error": "需 confirm=true 确认批量删除"}
+    if not req.strategy_ids:
+        return {"success": False, "error": "请提供要删除的策略ID列表"}
+    from services.strategy_service import batch_delete_strategies
+    result = await batch_delete_strategies(req.strategy_ids)
+    return {"success": True, "data": result}
+
+
+# ------------------------------------------------------------------
+# 策略日志
+# ------------------------------------------------------------------
+
+@router.get("/{strategy_id}/logs")
+async def api_get_strategy_logs(
+    strategy_id: str,
+    limit: int = Query(100, ge=10, le=500),
+    event_type: Optional[str] = Query(None),
+    _user: dict = Depends(get_current_user),
+):
+    """获取策略运行日志（最近 N 条，可按类型过滤）。
+    内存缓冲区为空时自动从 DB 恢复。
+    """
+    logs = get_logs(strategy_id, limit=limit, event_type=event_type)
+    if not logs:
+        # 内存为空，尝试从 DB 恢复
+        from services.strategy_log import recover_from_db
+        await recover_from_db(strategy_id, limit=limit)
+        logs = get_logs(strategy_id, limit=limit, event_type=event_type)
+    return {"success": True, "data": logs}
 
 # ------------------------------------------------------------------
 # 策略池管理

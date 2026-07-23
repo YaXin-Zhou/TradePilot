@@ -16,15 +16,26 @@ interface PortfolioSummary {
   active_strategies: number;
 }
 
+interface RealtimeAssets {
+  total_assets_usdt: number;
+  total_unrealized_pnl: number;
+  total_pnl_pct: number;
+  total_buy_cost: number;
+  positions_value_usdt: number;
+  weighted_24h_change_pct: number;
+}
+
 export default function PortfolioSummaryWidget({ refreshKey }: { refreshKey: number }) {
   const [data, setData] = useState<PortfolioSummary | null>(null);
+  const [realtime, setRealtime] = useState<RealtimeAssets | null>(null);
   const { t } = useLanguage();
 
   useEffect(() => {
     api.getPortfolioSummary().then(setData).catch(() => {});
+    api.getRealtimeAssets().then(setRealtime).catch(() => {});
   }, [refreshKey]);
 
-  if (!data) {
+  if (!data || !realtime) {
     return (
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[1, 2, 3, 4].map((i) => (
@@ -39,24 +50,24 @@ export default function PortfolioSummaryWidget({ refreshKey }: { refreshKey: num
   const cards = [
     {
       label: t("dash.totalValue"),
-      value: formatUSD(data.total_value_usdt),
-      sub: "BTC: " + data.btc_balance.toFixed(6),
+      value: formatUSD(realtime.total_assets_usdt),
+      sub: t("dash.usdtBalance") + ": " + formatUSD(data.usdt_balance),
       icon: DollarSign,
       color: "#00c076",
     },
     {
-      label: t("dash.usdtBalance"),
-      value: formatUSD(data.usdt_balance),
-      sub: "BTC Price: " + formatUSD(data.btc_price),
-      icon: Wallet,
-      color: "#1e80ff",
+      label: t("dash.totalPnl"),
+      value: (realtime.total_unrealized_pnl >= 0 ? "+" : "") + realtime.total_unrealized_pnl.toFixed(2) + " USDT",
+      sub: (realtime.total_pnl_pct >= 0 ? "+" : "") + realtime.total_pnl_pct.toFixed(2) + "%",
+      icon: realtime.total_unrealized_pnl >= 0 ? TrendingUp : TrendingDown,
+      color: realtime.total_unrealized_pnl >= 0 ? "#00c076" : "#f6465d",
     },
     {
-      label: t("dash.totalPnl"),
-      value: (data.total_pnl >= 0 ? "+" : "") + data.total_pnl.toFixed(4) + " USDT",
-      sub: data.total_trades + " " + t("dash.tradesDone"),
-      icon: data.total_pnl >= 0 ? TrendingUp : TrendingDown,
-      color: data.total_pnl >= 0 ? "#00c076" : "#f6465d",
+      label: t("dash.positionsValue"),
+      value: formatUSD(realtime.positions_value_usdt),
+      sub: "24h: " + (realtime.weighted_24h_change_pct >= 0 ? "+" : "") + realtime.weighted_24h_change_pct.toFixed(2) + "%",
+      icon: Activity,
+      color: realtime.weighted_24h_change_pct >= 0 ? "#00c076" : "#f6465d",
     },
     {
       label: t("dash.activeStrategies"),

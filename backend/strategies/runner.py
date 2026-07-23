@@ -35,6 +35,7 @@ from core.tick_cache import tick_cache
 from config import settings
 from services.regime_detector import regime_detector, MarketRegime
 from services.risk_engine import risk_engine
+from services.strategy_log import append as log_event
 from services.stop_loss import StopLossManager, StopLossConfig
 from services.portfolio_allocator import portfolio_allocator
 
@@ -71,7 +72,8 @@ async def _get_cached_balance() -> dict:
         bal = await asyncio.to_thread(shared_exchange.fetch_balance)
         _balance_cache[key] = (time.time(), bal)
         return bal
-    except Exception:
+    except Exception as e:
+        log.debug(f"fetch_balance_from_exchange failed: {e}")
         return {}
 
 
@@ -433,7 +435,8 @@ class StrategyRunner:
         try:
             bal = await _get_cached_balance()
             return bal.get("USDT", {}).get("total", 0.0)
-        except Exception:
+        except Exception as e:
+            log.debug(f"USDT balance read failed: {e}")
             return 0.0
 
     def _get_strategy_weight(self, strategy_id: str) -> float:
@@ -443,8 +446,8 @@ class StrategyRunner:
             s = strategy_pool.get(strategy_id)
             if s:
                 return s.weight
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug(f"strategy weight lookup failed for {strategy_id}: {e}")
         return 0.1
 
     @staticmethod
@@ -487,12 +490,16 @@ class StrategyRunner:
                             f"pos_qty={pos_qty:.6f} pos_usdt={pos_usdt:.2f} "
                             f"instance={INSTANCE_ID}"
                         )
+                        log_event(sid, "heartbeat",
+                                  f"Running: {_tick_count} ticks, pos={pos_qty:.6f} (${pos_usdt:.2f})",
+                                  {"ticks": _tick_count, "pos_qty": pos_qty, "pos_usdt": pos_usdt})
                         _last_heartbeat = now
 
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
                     log.error(f"StrategyRunner[{sid}] tick error: {e}")
+                    log_event(sid, "error", f"Tick error: {e}", {"error": str(e)})
                 await asyncio.sleep(5)
         except asyncio.CancelledError:
             log.info(f"StrategyRunner[{sid}]: stopped (ticks={_tick_count})")
@@ -514,6 +521,9 @@ class StrategyRunner:
             result = sm.check()
             if result.triggered:
                 log.warning(f"StrategyRunner[{sid}] stop loss: {result.message}")
+                log_event(sid, "stop_loss", f"Stop loss triggered: {result.message}", {
+                    "price": current_price, "stop_price": sm.config.stop_price,
+                })
                 await self._close_position(sid, obj.symbol, sm.side)
                 return
 
@@ -523,6 +533,8 @@ class StrategyRunner:
             return
 
         side = "buy" if signal.type in (SignalType.BUY, SignalType.STRONG_BUY) else "sell"
+        log_event(sid, f"signal_{side}", f"Signal: {signal.type.value} @ ${current_price:.2f}",
+                  {"price": current_price, "signal": signal.type.value})
 
         # 4. 风控 + 仓位计算
         regime = await self._detect_regime(obj.symbol)
@@ -577,6 +589,9 @@ class StrategyRunner:
             )
             log.info(f"[RUNNER_ORDER] sid={sid} {side} {order_amount:.6f} "
                      f"(@{current_price:.2f} = ${order_usdt:.2f}) id={order.get('id')}")
+            log_event(sid, "order_placed",
+                      f"{side.upper()} {order_amount:.6f} @ ${current_price:.2f} (≈${order_usdt:.2f})",
+                      {"side": side, "amount": order_amount, "price": current_price, "order_id": order.get("id")})
 
             # 对账（fetch_order 校验订单真实存在）
             if order.get("id"):
@@ -598,14 +613,22 @@ class StrategyRunner:
 
         except ExchangeError as e:
             log.error(f"StrategyRunner[{sid}] order FAILED: {e}")
+            log_event(sid, "order_error", f"Order failed: {e}", {"error": str(e)})
             return
         except Exception as e:
             log.error(f"StrategyRunner[{sid}] order exception: {e}")
+            log_event(sid, "order_error", f"Order exception: {e}", {"error": str(e)})
             return
 
-        # 9. 初始化/更新止损状态机
+        # 9. 初始化/更新止损状态机（优先使用策略自身风控参数）
         policy = risk_engine.get_policy(regime)
         sl_config = StopLossConfig.from_policy(policy)
+        # 策略 config 中的风控参数覆盖全局 policy
+        strat_risk = getattr(obj, "config", {}) or {}
+        if strat_risk.get("stop_loss_pct"):
+            sl_config.stop_loss_pct = float(strat_risk["stop_loss_pct"])
+        if strat_risk.get("trailing_stop_pct"):
+            sl_config.trailing_stop_pct = float(strat_risk["trailing_stop_pct"])
         side_str = "long" if side == "buy" else "short"
         if sid in self._stop_managers:
             sm = self._stop_managers[sid]
@@ -639,6 +662,9 @@ class StrategyRunner:
             )
             log.info(f"[RUNNER_CLOSE_DONE] sid={sid} id={order.get('id')} "
                      f"side={close_side} qty={qty:.6f}")
+            log_event(sid, "order_placed",
+                      f"CLOSE {close_side.upper()} {qty:.6f} @ market (id={order.get('id')})",
+                      {"side": close_side, "amount": qty, "order_id": order.get("id")})
 
             # 对账
             if order.get("id"):
@@ -651,8 +677,8 @@ class StrategyRunner:
                         qty = actual_filled
                         log.info(f"[RUNNER_CLOSE_VERIFIED] sid={sid} id={order['id']} "
                                  f"filled={actual_filled:.6f}")
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug(f"Order verification fallback failed for {sid}: {e}")
 
         except ExchangeError as e:
             log.error(f"[RUNNER_CLOSE_FAILED] sid={sid} error={e}")
@@ -706,7 +732,7 @@ def _build_strategy_obj(strategy: Strategy):
     根据 strategy.type 实例化对应的策略类。
     """
     try:
-        from strategies.grid_strategy import GridStrategy
+        from strategies.grid import GridStrategy
         from strategies.ma_cross import MACrossStrategy
         from strategies.rsi_strategy import RSIStrategy
         from strategies.bollinger import BollingerStrategy

@@ -64,10 +64,10 @@ class ExchangeClient:
 
         self._exchange = exchange_class(params)
         if testnet:
-            try:
-                self._exchange.set_sandbox_mode(True)
-            except Exception:
-                pass
+            self._exchange.set_sandbox_mode(True)
+            # OKX 模拟盘用同一个域名(okx.com)，通过 x-simulated-trading header 区分
+            # 不需要改 URL——okx.cab 在国内不可达
+            log.info(f"ExchangeClient: sandbox mode enabled for {exchange_name}")
         self._markets_loaded = False
         self._testnet = testnet
         self._connected = False
@@ -81,10 +81,12 @@ class ExchangeClient:
         try:
             self._exchange.load_markets()
             self._markets_loaded = True
-            self._connected = True  # FIX: 成功后标记连接正常
-        except Exception:
+            self._connected = True
+            log.debug(f"ExchangeClient: markets loaded from {self._exchange.hostname}")
+        except Exception as e:
             self._last_attempt = time.time()
             self._markets_loaded = False
+            log.warning(f"ExchangeClient: load_markets failed from {self._exchange.hostname}: {e}")
 
     def _try_reconnect(self) -> bool:
         """尝试重连，指数退避。返回当前是否连接"""

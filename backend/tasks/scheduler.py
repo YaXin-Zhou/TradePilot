@@ -116,6 +116,17 @@ async def flush_pending_orders():
         log.debug(f"Pending orders flush failed: {e}")
 
 
+async def flush_strategy_logs():
+    """每 10 秒将策略日志内存队列刷入 DB"""
+    try:
+        from services.strategy_log import flush_to_db
+        n = await flush_to_db()
+        if n:
+            log.debug(f"StrategyLog flushed: {n} events")
+    except Exception as e:
+        log.debug(f"StrategyLog flush failed: {e}")
+
+
 async def system_heartbeat():
     """系统心跳日志 — 每 60 秒输出系统整体运行状态。
 
@@ -134,8 +145,8 @@ async def system_heartbeat():
             from strategies.runner import runner
             running = len(runner._tasks)
             positions = len(runner._positions_usdt)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning(f"获取策略运行状态失败: {e}")
 
         # 交易所连接状态
         exchange_ok = shared_exchange._connected if hasattr(shared_exchange, '_connected') else False
@@ -155,8 +166,8 @@ async def system_heartbeat():
             from sqlalchemy import select, func
             async with async_session() as session:
                 db_orders = await session.scalar(select(func.count(Order.id))) or 0
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning(f"统计DB订单数失败: {e}")
 
         log.info(
             f"[HEARTBEAT] running_strategies={running} positions={positions} "
@@ -178,17 +189,19 @@ def start_scheduler():
     scheduler.add_job(flush_pending_orders, IntervalTrigger(seconds=30), id="flush_pending_orders", replace_existing=True)
     # 系统心跳日志（每 60 秒输出运行状态）
     scheduler.add_job(system_heartbeat, IntervalTrigger(seconds=60), id="system_heartbeat", replace_existing=True)
+    # 策略日志刷盘（每 10 秒将内存队列写入 DB）
+    scheduler.add_job(flush_strategy_logs, IntervalTrigger(seconds=10), id="flush_strategy_logs", replace_existing=True)
     # Phase 8: 任务执行监听（异常隔离 + 记录）
     scheduler.add_listener(_job_listener, EVENT_JOB_ERROR | EVENT_JOB_EXECUTED)
     scheduler.start()
     log.info("Scheduler started (market data: 1h, ML retrain: 24h, AI heartbeat: 6h, "
-             "kill_switch refresh: 5s, pending orders flush: 30s, system heartbeat: 60s)")
+             "kill_switch refresh: 5s, pending orders flush: 30s, system heartbeat: 60s, strategy log flush: 10s)")
 
 
 def stop_scheduler():
     try:
         scheduler.shutdown(wait=False)
         log.info("Scheduler stopped")
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning(f"关闭调度器失败: {e}")
 

@@ -236,8 +236,8 @@ def _verify_api_key_permissions(api_key: str, secret: str, passphrase: str, test
         if testnet:
             try:
                 ex.set_sandbox_mode(True)
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug(f"设置模拟盘模式失败（可忽略）: {e}")
 
         ex.load_markets()
 
@@ -255,10 +255,10 @@ def _verify_api_key_permissions(api_key: str, secret: str, passphrase: str, test
                 try:
                     ex.fetch_deposits_withdrawals({"limit": 1})
                     return True, "⚠️ 警告：该 API Key 似乎有提币权限，强烈建议在 OKX 后台关闭提币权限！"
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as e:
+                    log.debug(f"检查提币权限失败（预期行为，无提币权限）: {e}")
+        except Exception as e:
+            log.debug(f"fetch_deposits_withdrawals方法不可用: {e}")
 
         mode_label = "模拟盘" if testnet else "实盘"
         return True, f"API Key 校验通过（{mode_label}，交易权限正常，未检测到提币权限）"

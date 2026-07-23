@@ -18,8 +18,7 @@ from core.exchange_registry import exchange_registry  # M2: 多租户实例池
 from core.logger import log
 from core.kill_switch import kill_switch
 from config import settings
-from services.risk_engine import risk_engine
-from services.regime_detector import regime_detector, MarketRegime
+from services.regime_detector import MarketRegime  # kept for runner compatibility
 from db.database import async_session
 from db.models import Order, AuditLog, OrderType, OrderStatus, StrategyType
 
@@ -259,27 +258,26 @@ async def _get_total_capital() -> float:
         return 0.0
 
 
-def _check_kill_switch() -> tuple[bool, str]:
-    """检查紧急停止状态"""
+def _check_kill_switch(side: str = "") -> tuple[bool, str]:
+    """检查紧急停止状态
+    手动交易且为卖单时，紧急停止允许平仓（卖）但禁止开仓（买）。
+    """
     if kill_switch.is_triggered:
-        return False, "KILL_SWITCH_TRIGGERED: 紧急停止已触发，所有交易已冻结。POST /api/trading/emergency-reset 解除"
+        if side == "sell":
+            return True, ""  # 手动卖单：紧急停止允许平仓止损
+        return False, "KILL_SWITCH_TRIGGERED: 紧急停止已触发，开仓已冻结（卖单仍可平仓）。POST /api/trading/emergency-reset 解除"
     return True, ""
 
 
 def _check_amount_limit(amount_usdt: float) -> tuple[bool, str]:
-    """检查单笔下单金额硬上限"""
+    """基础金额校验（v2.1: 全局硬上限已移除，仅检查 >0）"""
     if amount_usdt <= 0:
         return False, "Amount must be positive"
-    if amount_usdt > settings.MAX_ORDER_AMOUNT_USDT:
-        return False, (
-            f"单笔金额 {amount_usdt:.2f} USDT 超过硬上限 "
-            f"{settings.MAX_ORDER_AMOUNT_USDT:.2f} USDT"
-        )
     return True, ""
 
 
 def _check_symbol_whitelist(symbol: str) -> tuple[bool, str]:
-    """实盘模式交易对白名单校验"""
+    """实盘模式交易对白名单校验（v2.1: 仅实盘生效，策略级白名单在 _enhanced_risk_check 中）"""
     if not settings.EXCHANGE_TESTNET and settings.LIVE_SYMBOL_WHITELIST:
         if symbol not in settings.LIVE_SYMBOL_WHITELIST:
             return False, f"实盘模式仅允许交易: {', '.join(settings.LIVE_SYMBOL_WHITELIST)}"
@@ -287,172 +285,157 @@ def _check_symbol_whitelist(symbol: str) -> tuple[bool, str]:
 
 
 # ------------------------------------------------------------------
-# v2.0 P5: 交易安全护栏
+# v2.1: 策略级可配置风控
 # ------------------------------------------------------------------
 
-# 启动时间戳（用于冷窗口检测）
-_APP_START_TIME = time.time()
-COLD_START_SECONDS = 60
-SLIPPAGE_MAX_PCT = 0.005  # 0.5% 最大滑点
-
-# 策略频率追踪（策略ID → 最近订单时间列表）
+# 策略频率追踪（按 max_freq 阈值判断）
 _order_timestamps: dict[str, list[float]] = {}
-MAX_ORDERS_PER_MINUTE = 10
-
-# 策略连续亏损计数
-_strategy_loss_streaks: dict[str, tuple[int, float]] = {}  # strategy_id → (count, last_pnl)
-MAX_CONSECUTIVE_LOSSES = 5
 
 
-def _check_cold_start() -> tuple[bool, str]:
-    """启动后 60 秒内禁止下单，等待 tick_cache 预热和市场数据就绪"""
-    elapsed = time.time() - _APP_START_TIME
-    if elapsed < COLD_START_SECONDS:
-        return False, f"系统预热中，请 {COLD_START_SECONDS - elapsed:.0f}s 后再试"
-    return True, ""
-
-
-def _check_slippage(order_price: float, market_price: float) -> tuple[bool, str]:
-    """滑点保护：市价单执行价与 ticker 偏差超过 0.5% 拒绝"""
-    if market_price <= 0:
-        return True, ""  # 无市价数据时放行
-    slippage = abs(order_price - market_price) / market_price
-    if slippage > SLIPPAGE_MAX_PCT:
-        return False, (
-            f"滑点 {slippage:.2%} 超过阈值 {SLIPPAGE_MAX_PCT:.2%}："
-            f"下单价格={order_price} 市价={market_price}"
-        )
-    return True, ""
-
-
-def _check_order_frequency(strategy_id: str) -> tuple[bool, str]:
-    """异常频率检测：同一策略 1 分钟内超过 10 笔订单自动拒绝"""
+def _check_strategy_frequency(strategy_id: str, max_per_minute: int) -> tuple[bool, str]:
     now = time.time()
     if strategy_id not in _order_timestamps:
         _order_timestamps[strategy_id] = []
-    # 清理超过 60s 的旧记录
     _order_timestamps[strategy_id] = [
         t for t in _order_timestamps[strategy_id] if now - t < 60
     ]
-    if len(_order_timestamps[strategy_id]) >= MAX_ORDERS_PER_MINUTE:
-        return False, (
-            f"策略 {strategy_id} 1 分钟内下单 {len(_order_timestamps[strategy_id])} 次，"
-            f"超过阈值 {MAX_ORDERS_PER_MINUTE}，已自动暂停"
-        )
+    if len(_order_timestamps[strategy_id]) >= max_per_minute:
+        return False, f"[{strategy_id}] 1min {len(_order_timestamps[strategy_id])}次 > 阈值{max_per_minute}"
     _order_timestamps[strategy_id].append(now)
     return True, ""
 
 
-async def _check_consecutive_losses(strategy_id: str) -> tuple[bool, str]:
-    """连续亏损检测：连续 5 笔亏损自动暂停策略"""
+async def _check_strategy_consecutive_losses(strategy_id: str, max_losses: int) -> tuple[bool, str]:
     from db.models import Trade
     from sqlalchemy import select, desc
 
     async with async_session() as session:
-        recent_trades = (
-            await session.execute(
-                select(Trade)
-                .where(Trade.strategy_id == strategy_id)
-                .order_by(desc(Trade.closed_at))
-                .limit(MAX_CONSECUTIVE_LOSSES)
-            )
-        ).scalars().all()
+        recent = (await session.execute(
+            select(Trade).where(Trade.strategy_id == strategy_id)
+            .order_by(desc(Trade.closed_at)).limit(max_losses)
+        )).scalars().all()
 
-    if len(recent_trades) < MAX_CONSECUTIVE_LOSSES:
+    if len(recent) < max_losses:
         return True, ""
 
-    consecutive_losses = 0
-    for trade in recent_trades:
-        if trade.profit < 0:
-            consecutive_losses += 1
+    consecutive = 0
+    for t in recent:
+        if t.profit < 0:
+            consecutive += 1
         else:
             break
-
-    if consecutive_losses >= MAX_CONSECUTIVE_LOSSES:
-        return False, (
-            f"策略 {strategy_id} 连续 {consecutive_losses} 笔亏损，"
-            f"超过阈值 {MAX_CONSECUTIVE_LOSSES}，已自动暂停"
-        )
+    if consecutive >= max_losses:
+        return False, f"[{strategy_id}] 连续{consecutive}笔亏损 >= 阈值{max_losses}"
     return True, ""
 
 
 async def _enhanced_risk_check(user_id: str, symbol: str, side: str,
                                 amount_usdt: float,
                                 strategy_id: str = "manual",
+                                source: str = "manual",
                                 order_price: float = 0.0,
-                                skip_cold_start: bool = False) -> tuple[bool, str]:
-    """主路径：冷启动 → kill_switch → 金额上限 → 白名单 → 频率检测 → 亏损检测 → 滑点 → regime → risk_engine
+                                skip_cold_start: bool = False,
+                                strategy_risk: dict | None = None) -> tuple[bool, str]:
+    """v2.1: 风控按来源独立配置，默认无限制
 
-    手动下单视为 CUSTOM 策略，跳过入场 Sharpe 门槛（sharpe_oos=999）。
-    风控引擎异常时默认拒绝（Phase 8: 不再 fallback 到旧 risk_manager）。
+    source="manual" — 仅 kill_switch + 手动风控设置（enabled=false 即跳过）
+    source="strategy" — 仅 kill_switch + 策略级风控（未配置则全放行）
+    source="emergency" — 仅 kill_switch
     """
-    # 0) v2.0: 冷启动窗口（pytest 运行时自动跳过）
-    if not skip_cold_start and "PYTEST_CURRENT_TEST" not in os.environ:
-        ok, msg = _check_cold_start()
-        if not ok:
-            return False, msg
+    # ============================================================
+    # kill_switch：唯一天塌不下来的全局安全网
+    # ============================================================
+    if amount_usdt <= 0:
+        return False, "Amount must be positive"
 
-    # 1) 紧急停止
-    ok, msg = _check_kill_switch()
+    if source in ("manual", "emergency"):
+        ok, msg = _check_kill_switch(side)
+    else:
+        ok, msg = _check_kill_switch("")
     if not ok:
         return False, msg
 
-    # 2) 金额硬上限
-    ok, msg = _check_amount_limit(amount_usdt)
-    if not ok:
-        return False, msg
+    # ============================================================
+    # 手动交易
+    # ============================================================
+    if source == "manual":
+        from core.app_config import get_manual_risk
+        mrisk = get_manual_risk()
+        if mrisk.get("enabled", False):
+            max_order = mrisk.get("max_order_usdt", 0)
+            min_order = mrisk.get("min_order_usdt", 0)
+            max_daily_loss = mrisk.get("max_daily_loss_usdt", 0)
 
-    # 3) 白名单
-    ok, msg = _check_symbol_whitelist(symbol)
-    if not ok:
-        return False, msg
+            if min_order > 0 and amount_usdt < min_order:
+                return False, f"金额 {amount_usdt:.2f} 低于最小限制 {min_order:.2f}"
+            if max_order > 0 and amount_usdt > max_order:
+                return False, f"金额 {amount_usdt:.2f} 超过最大限制 {max_order:.2f}"
+            if max_daily_loss > 0:
+                day_loss = await _get_daily_realized_loss(user_id)
+                if day_loss + amount_usdt > max_daily_loss:
+                    return False, f"日亏损 {day_loss:.2f}+{amount_usdt:.2f} 超过上限 {max_daily_loss:.2f}"
 
-    # 4) v2.0: 异常频率检测
-    ok, msg = _check_order_frequency(strategy_id)
-    if not ok:
-        log.warning(f"Order frequency limit: {msg}")
-        return False, msg
-
-    # 5) v2.0: 连续亏损检测
-    if strategy_id != "manual":
-        ok, msg = await _check_consecutive_losses(strategy_id)
-        if not ok:
-            log.warning(f"Consecutive loss limit: {msg}")
-            return False, msg
-
-    # 6) v2.0: 滑点保护（有下单价格时检查）
-    if order_price > 0:
-        try:
-            current_price = (await tick_cache.get(symbol)).get("last", 0)
-            ok, msg = _check_slippage(order_price, current_price)
-            if not ok:
-                return False, msg
-        except Exception:
-            pass  # 无行情数据时放行
-
-    # 7) 风控引擎（异常默认拒绝）
-    try:
-        regime = await _detect_regime(symbol)
-        total_capital = await _get_total_capital()
-
-        result = risk_engine.full_check(
-            regime=regime,
-            strategy_type=StrategyType.CUSTOM.value,
-            sharpe_oos=999.0,  # 手动下单不检查 Sharpe
-            total_capital=total_capital if total_capital > 0 else 10000.0,
-            current_position=0.0,
-            new_amount=amount_usdt,
-            strategy_position=0.0,
-            daily_pnl=0.0,
-            user_id=user_id,
-        )
-        if not result.passed:
-            return False, f"[RiskEngine:{regime.value}] {result.reason}"
+        log.info(f"[RISK_CHECK] source=manual symbol={symbol} amount={amount_usdt:.2f} — ok")
         return True, ""
-    except Exception as e:
-        # Phase 8: 风控引擎异常默认拒绝（宁可错杀不可放过）
-        log.error(f"Risk check exception (default DENY): {e}")
-        return False, f"风控检查异常，默认拒绝下单: {e}"
+
+    # ============================================================
+    # 紧急平仓
+    # ============================================================
+    if source == "emergency":
+        log.info(f"[RISK_CHECK] source=emergency symbol={symbol} — ok")
+        return True, ""
+
+    # ============================================================
+    # 策略风控：读取策略配置，默认全放行
+    # ============================================================
+    sr = strategy_risk or {}
+    if not sr.get("enabled", False):
+        log.info(f"[RISK_CHECK] source=strategy id={strategy_id} risk=off — ok")
+        return True, ""
+
+    # 金额上限（0=不限制）
+    max_order = sr.get("max_order_usdt", 0)
+    if max_order > 0 and amount_usdt > max_order:
+        return False, f"[{strategy_id}] 金额 {amount_usdt:.2f} > 上限 {max_order:.2f}"
+
+    # 日亏损上限
+    max_daily = sr.get("max_daily_loss_usdt", 0)
+    if max_daily > 0:
+        day_loss = await _get_daily_realized_loss(user_id)
+        if day_loss + amount_usdt > max_daily:
+            return False, f"[{strategy_id}] 日亏损 {day_loss:.2f} > 上限 {max_daily:.2f}"
+
+    # 下单频率
+    max_freq = sr.get("max_orders_per_minute", 0)
+    if max_freq > 0:
+        ok, msg = _check_strategy_frequency(strategy_id, max_freq)
+        if not ok:
+            return False, msg
+
+    # 连续亏损
+    max_losses = sr.get("max_consecutive_losses", 0)
+    if max_losses > 0:
+        ok, msg = await _check_strategy_consecutive_losses(strategy_id, max_losses)
+        if not ok:
+            return False, msg
+
+    # 滑点
+    max_slippage = sr.get("slippage_max_pct", 0)
+    if max_slippage > 0 and order_price > 0:
+        try:
+            cp = (await tick_cache.get(symbol)).get("last", 0)
+            if cp > 0 and abs(order_price - cp) / cp > max_slippage:
+                return False, f"滑点 {abs(order_price-cp)/cp:.2%} > 阈值 {max_slippage:.2%}"
+        except Exception as e:
+            log.warning(f"滑点检查失败: {e}")
+
+    # 策略级交易对白名单
+    allowed = sr.get("allowed_symbols", [])
+    if allowed and symbol not in allowed:
+        return False, f"[{strategy_id}] {symbol} 不在允许列表 {allowed}"
+
+    log.info(f"[RISK_CHECK] source=strategy id={strategy_id} symbol={symbol} amount={amount_usdt:.2f} — ok")
+    return True, ""
 
 
 # ------------------------------------------------------------------
@@ -497,7 +480,7 @@ async def place_limit_order(user_id: str, symbol: str, side: str,
         return None, "实盘模式下单需二次确认（confirm_live=true）", False
 
     amount_usdt = amount * price
-    ok, msg = await _enhanced_risk_check(user_id, symbol, side, amount_usdt)
+    ok, msg = await _enhanced_risk_check(user_id, symbol, side, amount_usdt, source="manual")
     if not ok:
         log.warning(f"[ORDER_REJECTED] reason=risk_check symbol={symbol} side={side} msg={msg}")
         return None, msg, False
@@ -551,16 +534,11 @@ async def place_limit_order(user_id: str, symbol: str, side: str,
 async def place_market_order(user_id: str, symbol: str, side: str,
                              amount: float,
                              confirm_live: bool = False,
-                             account_id: str = "default") -> tuple[dict | None, str | None, bool]:
+                             account_id: str = "default",
+                             source: str = "manual") -> tuple[dict | None, str | None, bool]:
     """下市价单。返回 (order, error_msg, is_mock)
 
-    Phase 8 改动：
-    - 下单失败抛错（不再返回 mock 假单）
-    - 实盘模式需 confirm_live=True
-    - 下单后 fetch_order 对账
-    M3 改动：
-    - 下单后原子写 orders + audit_logs（本地落库）
-    - 支持 account_id 多账户
+    source: "manual"=手动交易(最小风控) / "strategy"=程序量化(全量风控) / "emergency"=紧急平仓(仅kill_switch)
     """
     log.info(f"[ORDER_REQUEST] type=MARKET user={user_id} account={account_id} "
              f"symbol={symbol} side={side} amount={amount} testnet={settings.EXCHANGE_TESTNET}")
@@ -576,7 +554,7 @@ async def place_market_order(user_id: str, symbol: str, side: str,
         return None, "无法获取当前价格，拒绝下单", False
 
     amount_usdt = amount * est_price
-    ok, msg = await _enhanced_risk_check(user_id, symbol, side, amount_usdt)
+    ok, msg = await _enhanced_risk_check(user_id, symbol, side, amount_usdt, source=source)
     if not ok:
         log.warning(f"[ORDER_REJECTED] reason=risk_check symbol={symbol} side={side} msg={msg}")
         return None, msg, False

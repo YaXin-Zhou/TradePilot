@@ -88,7 +88,7 @@ Analyze ALL indicators. Consider trend, momentum, volatility, volume."""
 
     async def _call_deepseek(self, prompt: str, system_prompt: Optional[str] = None) -> dict:
         sp = system_prompt or self.SYSTEM_PROMPT
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=90) as client:
             resp = await client.post(
                 self.api_url,
                 headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
@@ -98,6 +98,9 @@ Analyze ALL indicators. Consider trend, momentum, volatility, volume."""
                 ], "temperature": 0.3},
             )
             resp.raise_for_status()
+            ct = resp.headers.get("content-type", "")
+            if "text/html" in ct:
+                raise RuntimeError(f"DeepSeek returned HTML error: {resp.text[:200]}")
             return resp.json()
 
     def _parse_response(self, raw: dict, market: dict) -> tuple[Signal, dict]:

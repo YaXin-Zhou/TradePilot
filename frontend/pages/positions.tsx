@@ -3,7 +3,7 @@ import { api } from "../lib/api";
 import { useLanguage } from "../lib/LanguageContext";
 import {
   Briefcase, RefreshCw, TrendingUp, TrendingDown,
-  ArrowUp, ArrowDown, Minus,
+  ArrowUp, ArrowDown, Minus, X,
 } from "lucide-react";
 
 interface PositionItem {
@@ -75,6 +75,24 @@ export default function PositionsPage() {
   const [refreshInterval] = useState(3000); // 3s 实时刷新
   const [flashPnl, setFlashPnl] = useState<"up" | "down" | null>(null);
   const prevPnlRef = useRef<number | null>(null);
+  const [closing, setClosing] = useState<string | null>(null);  // 正在平仓的币种
+
+  const handleClose = async (asset: string, quantity: number) => {
+    const ok = window.confirm(
+      isZh
+        ? `确认市价平仓 ${asset}？\n\n数量：${quantity.toFixed(6)} ${asset}\n将以当前市价卖出全部持仓。`
+        : `Confirm market close ${asset}?\n\nQty: ${quantity.toFixed(6)} ${asset}\nWill sell all at current market price.`
+    );
+    if (!ok) return;
+    setClosing(asset);
+    try {
+      await api.closePosition(asset, true);
+      load(); // 刷新数据
+    } catch (e) {
+      console.error("Close position failed:", e);
+    }
+    setClosing(null);
+  };
 
   const load = useCallback(async () => {
     try {
@@ -180,6 +198,7 @@ export default function PositionsPage() {
           <span>
             {isZh ? `${p?.count ?? 0} 个持仓` : `${p?.count ?? 0} positions`}
           </span>
+          <span className="text-dark-600 text-[10px] ml-2 px-1.5 py-0.5 border border-dark-700 rounded">build 20260722</span>
         </div>
         <button
           onClick={load}
@@ -209,6 +228,7 @@ export default function PositionsPage() {
                 <th className="text-right py-2.5 px-3 font-medium hidden md:table-cell">{isZh ? "投入" : "Cost"}</th>
                 <th className="text-right py-2.5 px-3 font-medium hidden md:table-cell">{isZh ? "市值" : "Value"}</th>
                 <th className="text-right py-2.5 px-3 font-medium">{isZh ? "盈亏" : "PnL"}</th>
+                <th className="text-center py-2.5 px-3 font-medium">{isZh ? "操作" : "Action"}</th>
               </tr>
             </thead>
             <tbody>
@@ -265,6 +285,27 @@ export default function PositionsPage() {
                         <span className="text-dark-500 text-xs">—</span>
                       )}
                     </td>
+                    <td className="py-2.5 px-3 text-center">
+                      <button
+                        onClick={() => handleClose(pos.asset, pos.quantity)}
+                        disabled={closing === pos.asset}
+                        className="px-3 py-1.5 rounded text-xs font-bold transition-all duration-200
+                          bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white
+                          border border-red-500/40 hover:border-red-500
+                          disabled:opacity-50 disabled:cursor-not-allowed
+                          shadow-sm hover:shadow-md active:scale-95"
+                        title={isZh ? "市价平仓" : "Close at Market"}
+                      >
+                        {closing === pos.asset ? (
+                          <RefreshCw size={13} className="animate-spin inline" />
+                        ) : (
+                          <X size={13} className="inline" />
+                        )}
+                        <span className="ml-1 hidden sm:inline">
+                          {isZh ? "平仓" : "Close"}
+                        </span>
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
@@ -286,6 +327,7 @@ export default function PositionsPage() {
                 <td className="py-2.5 px-3 text-right font-mono font-bold text-xs" style={{ color: pnlColor(pnl) }}>
                   {fmt$(pnl)} ({pnlSign(pnlPct)}{Math.abs(pnlPct).toFixed(2)}%)
                 </td>
+                <td className="py-2.5 px-3" />
               </tr>
             </tfoot>
           </table>

@@ -20,8 +20,8 @@ def _load_or_create_key() -> bytes:
         try:
             b = key_str.encode() if isinstance(key_str, str) else key_str
             return base64.urlsafe_b64encode(base64.urlsafe_b64decode(b))
-        except Exception:
-            pass
+        except Exception as e:
+            _log.warning(f"ENCRYPTION_KEY decode failed ({e}), generating new key")
 
     # 自动生成
     new_key = _generate_key()
@@ -55,14 +55,18 @@ def _persist_key(env_path: str, key: str):
         f.writelines(lines)
 
 
-# 模块级单例
+# 模块级单例（线程安全）
+import threading as _threading
 _fernet: Fernet | None = None
+_fernet_lock = _threading.Lock()
 
 
 def get_fernet() -> Fernet:
     global _fernet
     if _fernet is None:
-        _fernet = Fernet(_load_or_create_key())
+        with _fernet_lock:
+            if _fernet is None:  # double-check
+                _fernet = Fernet(_load_or_create_key())
     return _fernet
 
 

@@ -103,8 +103,15 @@ class ExchangeRegistry:
 
     async def close_all(self):
         """关闭所有实例（应用关闭时调用）"""
+        for key, client in list(self._instances.items()):
+            try:
+                if hasattr(client, "_exchange") and client._exchange:
+                    await client._exchange.close()
+                log.debug(f"ExchangeRegistry: closed {key}")
+            except Exception as e:
+                log.warning(f"ExchangeRegistry: failed to close {key}: {e}")
         self._instances.clear()
-        log.info("ExchangeRegistry: all instances cleared")
+        log.info("ExchangeRegistry: all instances closed and cleared")
 
 
 # 模块级单例
