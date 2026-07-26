@@ -7,11 +7,16 @@ v1.3: 统一使用 shared_exchange 避免多 worker 下实例状态不一致。
 from datetime import datetime, timezone
 
 from sqlalchemy import select, func
-from core.exchange import shared_exchange as _exchange
+import core.exchange as exmod
 from config import settings
 from db.models import Trade, Strategy, Order, OrderSide, OrderStatus
 from db.database import async_session
 from core.logger import log
+
+
+def _get_exchange():
+    """动态获取 shared_exchange 实例（避免热重建后引用过期）"""
+    return exmod.shared_exchange
 
 
 async def get_portfolio_summary() -> dict:
@@ -21,6 +26,7 @@ async def get_portfolio_summary() -> dict:
     DB 查询失败时返回零值（不阻塞前端展示余额）。
     """
     try:
+        _exchange = _get_exchange()
         balance = _exchange.fetch_balance()
         ticker = _exchange.fetch_ticker(settings.DEFAULT_SYMBOL)
         total_usdt = balance.get("USDT", {}).get("total", 0)
@@ -72,6 +78,7 @@ async def _get_avg_buy_cost(symbols: list[str]) -> dict[str, dict]:
     """
     result_map: dict[str, dict] = {}
 
+    _exchange = _get_exchange()
     # 1. 优先从交易所获取成交记录
     for symbol in symbols:
         result_map[symbol] = {
@@ -143,6 +150,7 @@ async def get_positions() -> dict:
     无顶层 "total" 键。原代码 balance.get("total", {}) 永远返回空 dict → 持仓列表恒空。
     """
     try:
+        _exchange = _get_exchange()
         balance = _exchange.fetch_balance()
     except Exception as e:
         log.warning(f"Positions: exchange fetch failed: {e}")
@@ -255,6 +263,7 @@ async def get_realtime_assets() -> dict:
     用于前端实时资金变化展示，聚合余额 + 持仓 + 盈亏。
     """
     try:
+        _exchange = _get_exchange()
         balance = _exchange.fetch_balance()
     except Exception as e:
         log.warning(f"RealtimeAssets: exchange fetch failed: {e}")

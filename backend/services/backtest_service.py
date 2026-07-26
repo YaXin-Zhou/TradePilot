@@ -4,7 +4,7 @@ import time as timemod
 import pathlib
 import pandas as pd
 import random
-from core.exchange import shared_exchange, ExchangeClient
+from core.exchange import ExchangeClient
 from config import settings
 from strategies.backtest import BacktestEngine
 from core.logger import log

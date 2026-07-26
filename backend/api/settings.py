@@ -180,10 +180,29 @@ async def _rebuild_exchange(api_key: str, secret: str, passphrase: str, testnet:
 
         # 同步更新全局 settings（用于白名单/实盘判断）
         global_settings.EXCHANGE_TESTNET = testnet
+        # 同步更新 API_KEY 状态（用于 /status 端点返回）
+        global_settings.EXCHANGE_API_KEY = api_key
 
-        mode = "TESTNET" if testnet else "LIVE"
-        log.info(f"Exchange instance rebuilt ({mode})")
-        return True, "热切换成功"
+        # 立即触发一次连接测试，更新 _connected 状态
+        try:
+            ok, msg, latency = client.test_connection()
+            if ok:
+                log.info(f"Exchange rebuilt + connected ({latency}ms)")
+                # 同步到 Redis，让其他 worker 立即感知
+                try:
+                    from core.redis import get_redis
+                    r = await get_redis()
+                    if r:
+                        await r.setex("exchange:connected", 10, "1")
+                except Exception:
+                    pass
+                return True, f"热切换成功，已连接 ({latency}ms)"
+            else:
+                log.warning(f"Exchange rebuilt but connection test failed: {msg}")
+                return True, f"热切换成功，但连接测试失败: {msg}"
+        except Exception as e:
+            log.warning(f"Exchange rebuilt but test_connection raised: {e}")
+            return True, f"热切换成功，但连接测试异常: {e}"
     except Exception as e:
         log.error(f"Exchange rebuild failed: {e}")
         return False, f"热切换失败: {e}"

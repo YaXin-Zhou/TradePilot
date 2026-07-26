@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { Layers, ChevronDown, ChevronUp } from "lucide-react";
 import { useLanguage } from "../lib/LanguageContext";
@@ -17,6 +17,9 @@ function useOrderbook(symbol: string) {
 export default function OrderbookDepth({ symbol = "BTC/USDT" }: { symbol?: string }) {
   const { t } = useLanguage();
   const { data, isLoading } = useOrderbook(symbol);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => { setMounted(true); }, []);
 
   const chartData = useMemo(() => {
     if (!data) return null;
@@ -33,7 +36,7 @@ export default function OrderbookDepth({ symbol = "BTC/USDT" }: { symbol?: strin
     return [...asks, ...bids];
   }, [data]);
 
-  if (isLoading) return <Skeleton height={300} />;
+  if (!mounted || isLoading) return <Skeleton height={300} />;
   if (!chartData) return null;
 
   const midPrice = data?.asks?.[0]?.[0] || 0;

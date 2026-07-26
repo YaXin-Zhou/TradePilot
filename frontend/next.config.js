@@ -15,7 +15,8 @@ const nextConfig = {
 
   // Phase 8: 优化大型包导入
   experimental: {
-    scrollRestoration: true,`r`n    optimizePackageImports: ["lucide-react", "recharts", "react-hot-toast"],
+    scrollRestoration: true,
+    optimizePackageImports: ["lucide-react", "recharts", "react-hot-toast"],
   },
 
   // Docker 静态导出：禁用图片优化（Nginx 直接提供）

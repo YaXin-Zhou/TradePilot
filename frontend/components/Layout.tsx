@@ -45,8 +45,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [emergencyDialog, setEmergencyDialog] = useState(false);
   const [emergencyLoading, setEmergencyLoading] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
   const router = useRouter();
   const { t, lang, toggleLang } = useLanguage();
+
+  // 避免 Hydration mismatch：只在客户端挂载后显示 token 相关的 UI
+  useEffect(() => { setHydrated(true); }, []);
 
   // SWR 自动轮询交易所状态（替代硬编码 fetch + setInterval）
   const { data: exchangeStatus } = useExchangeStatus();
@@ -160,7 +164,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <Languages size={14} />
             {lang === "zh" ? "EN" : "中"}
           </button>
-          {getToken() ? (
+          {!hydrated ? (
+            // SSR 占位：避免 hydration mismatch
+            <div className="w-full py-2" />
+          ) : getToken() ? (
             <button onClick={() => { clearToken(); window.location.href = "/login" }}
               className="flex items-center justify-center gap-2 w-full py-2 rounded-lg text-dark-400 hover:text-dark-200 hover:bg-dark-800 transition-all text-xs">
               <LogOut size={14} /> {lang === "zh" ? "登出" : "Logout"}

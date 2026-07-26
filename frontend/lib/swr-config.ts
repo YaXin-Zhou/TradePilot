@@ -5,10 +5,18 @@ import { api, getToken } from "./api";
 /** 默认 SWR 配置 */
 export const swrConfig: SWRConfiguration = {
   revalidateOnFocus: true,
-  revalidateOnReconnect: true,`r`n  revalidateOnMount: true,`r`n  keepPreviousData: true,
+  revalidateOnReconnect: true,
+  revalidateOnMount: true,
+  keepPreviousData: true,
   errorRetryCount: 3,
   errorRetryInterval: 5000,
+  suspense: false,
+  // 关键：SSR 时不做 hydration data，避免图表 SVG 与 Skeleton div 不一致
+  revalidateIfStale: true,
 };
+
+/** 是否为服务端环境 */
+const isServer = typeof window === "undefined";
 
 /**
  * 通用的 SWR fetcher — 直接调 api 对象方法。
@@ -23,7 +31,9 @@ export function useMarketData<T>(
 ) {
   // 需鉴权的端点：无 token 时 key=null，SWR 不发请求
   const effectiveKey = requireAuth && !getToken() ? null : key;
-  return useSWR<T>(effectiveKey, fetcher, {
+  // SSR 时 key=null，避免服务端 fetch 导致 hydration mismatch
+  const ssrSafeKey = isServer ? null : effectiveKey;
+  return useSWR<T>(ssrSafeKey, fetcher, {
     ...swrConfig,
     refreshInterval: refreshInterval ?? 30000,
     dedupingInterval: 2000,

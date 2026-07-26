@@ -9,10 +9,14 @@
   6. 下单后 fetch_order 对账
   7. 实盘模式 AI 功能禁用
 """
+from __future__ import annotations
+
 import asyncio
 import os
 import time
-from core.exchange import shared_exchange, ExchangeError
+from typing import Optional
+import core.exchange as exmod
+from core.exchange import ExchangeError
 from core.tick_cache import tick_cache  # M2: TTL 缓存
 from core.exchange_registry import exchange_registry  # M2: 多租户实例池
 from core.logger import log
@@ -258,7 +262,7 @@ async def _get_price(symbol: str) -> float:
 async def _detect_regime(symbol: str) -> MarketRegime:
     """获取当前市场状态，失败默认 RANGING_LOW_VOL（最保守的震荡态）"""
     try:
-        df = await asyncio.to_thread(shared_exchange.fetch_ohlcv, symbol, "1h", 200)
+        df = await asyncio.to_thread(exmod.shared_exchange.fetch_ohlcv, symbol, "1h", 200)
         if df is None or df.empty:
             return MarketRegime.RANGING_LOW_VOL
         ohlcv = df.to_dict("records")
@@ -272,7 +276,7 @@ async def _detect_regime(symbol: str) -> MarketRegime:
 async def _get_total_capital() -> float:
     """获取总资金（USDT），失败默认 0（保守）"""
     try:
-        bal = await asyncio.to_thread(shared_exchange.fetch_balance)
+        bal = await asyncio.to_thread(exmod.shared_exchange.fetch_balance)
         return bal.get("USDT", {}).get("total", 0.0)
     except Exception:
         return 0.0
@@ -469,7 +473,7 @@ async def get_balance() -> tuple[dict, bool]:
     前端通过 is_mock 标识显示"连接异常"。
     """
     try:
-        bal = await asyncio.to_thread(shared_exchange.fetch_balance)
+        bal = await asyncio.to_thread(exmod.shared_exchange.fetch_balance)
         return bal, False
     except Exception as e:
         log.warning(f"Balance fetch failed: {e}")
@@ -509,7 +513,7 @@ async def place_limit_order(user_id: str, symbol: str, side: str,
 
     try:
         order = await asyncio.to_thread(
-            shared_exchange.create_limit_order, symbol, side, amount, price
+            exmod.shared_exchange.create_limit_order, symbol, side, amount, price
         )
         log.info(f"[ORDER_PLACED] type=LIMIT id={order.get('id')} symbol={symbol} "
                  f"side={side} amount={amount} price={order.get('price', price)} "
@@ -519,7 +523,7 @@ async def place_limit_order(user_id: str, symbol: str, side: str,
         if order.get("id"):
             try:
                 verified = await asyncio.to_thread(
-                    shared_exchange.fetch_order, order["id"], symbol
+                    exmod.shared_exchange.fetch_order, order["id"], symbol
                 )
                 if verified:
                     order["verified"] = True
@@ -583,7 +587,7 @@ async def place_market_order(user_id: str, symbol: str, side: str,
 
     try:
         order = await asyncio.to_thread(
-            shared_exchange.create_market_order, symbol, side, amount
+            exmod.shared_exchange.create_market_order, symbol, side, amount
         )
         log.info(f"[ORDER_PLACED] type=MARKET id={order.get('id')} symbol={symbol} "
                  f"side={side} amount={amount} price={order.get('price', 0)} "
@@ -593,7 +597,7 @@ async def place_market_order(user_id: str, symbol: str, side: str,
         if order.get("id"):
             try:
                 verified = await asyncio.to_thread(
-                    shared_exchange.fetch_order, order["id"], symbol
+                    exmod.shared_exchange.fetch_order, order["id"], symbol
                 )
                 if verified:
                     order["verified"] = True
@@ -631,7 +635,7 @@ async def cancel_order(order_id: str, symbol: str) -> tuple[bool, str]:
     if not ok_ks:
         return False, msg_ks
     try:
-        ok = await asyncio.to_thread(shared_exchange.cancel_order, order_id, symbol)
+        ok = await asyncio.to_thread(exmod.shared_exchange.cancel_order, order_id, symbol)
         if ok:
             log.info(f"Order cancelled: {order_id} {symbol}")
             return True, "撤单成功"
@@ -647,7 +651,7 @@ async def cancel_all_orders(symbol: str = "") -> tuple[int, str]:
     if not ok_ks:
         return 0, msg_ks
     try:
-        n = await asyncio.to_thread(shared_exchange.cancel_all_orders, symbol or None)
+        n = await asyncio.to_thread(exmod.shared_exchange.cancel_all_orders, symbol or None)
         log.info(f"Cancelled {n} open orders (symbol={symbol or 'all'})")
         return n, f"已撤销 {n} 个挂单"
     except Exception as e:
@@ -657,7 +661,7 @@ async def cancel_all_orders(symbol: str = "") -> tuple[int, str]:
 
 def get_open_orders(symbol: str) -> tuple[list, bool]:
     try:
-        orders = shared_exchange.fetch_open_orders(symbol)
+        orders = exmod.shared_exchange.fetch_open_orders(symbol)
         return orders, False
     except Exception:
         return [], True
@@ -665,7 +669,7 @@ def get_open_orders(symbol: str) -> tuple[list, bool]:
 
 def get_trade_history(symbol: str, limit: int = 50) -> tuple[list, bool]:
     try:
-        trades = shared_exchange.fetch_my_trades(symbol, limit)
+        trades = exmod.shared_exchange.fetch_my_trades(symbol, limit)
         return trades, False
     except Exception:
         return [], True
@@ -700,7 +704,7 @@ async def execute_emergency_stop(by: str = "manual", reason: str = "") -> dict:
 
     # 2. 市价平掉所有持仓
     try:
-        bal = await asyncio.to_thread(shared_exchange.fetch_balance)
+        bal = await asyncio.to_thread(exmod.shared_exchange.fetch_balance)
         closed = 0
         for cur, info in bal.items():
             if cur in ("USDT", "USD", "USDC"):
@@ -710,7 +714,7 @@ async def execute_emergency_stop(by: str = "manual", reason: str = "") -> dict:
                 symbol = f"{cur}/USDT"
                 try:
                     await asyncio.to_thread(
-                        shared_exchange.create_market_order, symbol, "sell", total
+                        exmod.shared_exchange.create_market_order, symbol, "sell", total
                     )
                     closed += 1
                     log.warning(f"Emergency: closed {total} {cur} via {symbol}")

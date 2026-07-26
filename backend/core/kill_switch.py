@@ -94,13 +94,22 @@ class KillSwitch:
     # ------------------------------------------------------------------
 
     async def init_from_db(self):
-        """从 DB 加载状态（lifespan 启动时调用）"""
+        """从 DB 加载状态（lifespan 启动时调用）
+
+        BUG-3 修复：不再硬编码 id=1，改为查询最新记录。若记录不存在则创建。
+        """
         try:
+            from sqlalchemy import select, desc
             from db.database import async_session
             from db.models import KillSwitchStateRecord
 
             async with async_session() as session:
-                record = await session.get(KillSwitchStateRecord, 1)
+                r = await session.execute(
+                    select(KillSwitchStateRecord)
+                    .order_by(desc(KillSwitchStateRecord.id))
+                    .limit(1)
+                )
+                record = r.scalar_one_or_none()
                 if record:
                     self._state = KillSwitchState.from_db(record)
                     if self.is_triggered:
@@ -111,7 +120,7 @@ class KillSwitch:
                         )
                 else:
                     # 首次启动：创建默认 ARMED 记录
-                    record = KillSwitchStateRecord(id=1, status=ARMED)
+                    record = KillSwitchStateRecord(status=ARMED)
                     session.add(record)
                     await session.commit()
             self._db_ready = True
@@ -125,11 +134,17 @@ class KillSwitch:
         if not self._db_ready:
             return
         try:
+            from sqlalchemy import select, desc
             from db.database import async_session
             from db.models import KillSwitchStateRecord
 
             async with async_session() as session:
-                record = await session.get(KillSwitchStateRecord, 1)
+                r = await session.execute(
+                    select(KillSwitchStateRecord)
+                    .order_by(desc(KillSwitchStateRecord.id))
+                    .limit(1)
+                )
+                record = r.scalar_one_or_none()
                 if record:
                     new_state = KillSwitchState.from_db(record)
                     # 只在状态变化时更新 + 日志
@@ -272,13 +287,19 @@ class KillSwitch:
             pass
 
     async def _save_to_db(self):
-        """异步写入 DB"""
+        """异步写入 DB — upsert 最新记录，不依赖硬编码 id"""
         try:
+            from sqlalchemy import select, desc
             from db.database import async_session
             from db.models import KillSwitchStateRecord
 
             async with async_session() as session:
-                record = await session.get(KillSwitchStateRecord, 1)
+                r = await session.execute(
+                    select(KillSwitchStateRecord)
+                    .order_by(desc(KillSwitchStateRecord.id))
+                    .limit(1)
+                )
+                record = r.scalar_one_or_none()
                 if record:
                     record.status = self._state.status
                     record.triggered_at = self._state.triggered_at
@@ -290,7 +311,6 @@ class KillSwitch:
                     record.strategies_stopped = self._state.strategies_stopped
                 else:
                     record = KillSwitchStateRecord(
-                        id=1,
                         status=self._state.status,
                         triggered_at=self._state.triggered_at,
                         triggered_by=self._state.triggered_by,

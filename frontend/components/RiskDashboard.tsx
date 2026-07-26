@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Shield, AlertTriangle, CheckCircle, Activity } from "lucide-react";
 import { useLanguage } from "../lib/LanguageContext";
 import { useMarketRegime, useKillSwitch } from "../lib/swr-config";
@@ -32,8 +33,11 @@ export default function RiskDashboard() {
   const { data: regime } = useMarketRegime();
   const { data: ks } = useKillSwitch();
   const { data: policies, isLoading } = useRiskPolicies();
+  const [mounted, setMounted] = useState(false);
 
-  if (isLoading) return <Skeleton height={200} />;
+  useEffect(() => { setMounted(true); }, []);
+
+  if (!mounted || isLoading) return <Skeleton height={200} />;
 
   const currentRegime = regime?.regime || "unknown";
   const currentPolicy = policies?.[currentRegime] as RiskPolicy | undefined;

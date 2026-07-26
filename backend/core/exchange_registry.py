@@ -15,7 +15,8 @@ from sqlalchemy import select
 from db.database import async_session
 from db.models import ExchangeCredential
 from core.crypto import decrypt
-from core.exchange import ExchangeClient, shared_exchange
+from core.exchange import ExchangeClient
+import core.exchange as exmod
 from core.logger import log
 from config import settings as global_settings
 
@@ -47,7 +48,7 @@ class ExchangeRegistry:
         if cred is None:
             # Fallback: 返回 shared_exchange（单账户兼容）
             log.debug(f"ExchangeRegistry: no credential for {key}, fallback to shared_exchange")
-            return shared_exchange
+            return exmod.shared_exchange
 
         # 3. 创建新实例
         try:
@@ -68,7 +69,7 @@ class ExchangeRegistry:
             return client
         except Exception as e:
             log.error(f"ExchangeRegistry: failed to create instance for {key}: {e}")
-            return shared_exchange
+            return exmod.shared_exchange
 
     async def _load_credential(
         self,

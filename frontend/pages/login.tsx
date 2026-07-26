@@ -20,10 +20,27 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
     try {
+      if (mode === "register") {
+        if (password.length < 8) {
+          setError("密码至少 8 个字符");
+          setLoading(false);
+          return;
+        }
+        if (!/\d/.test(password)) {
+          setError("密码必须包含至少 1 个数字");
+          setLoading(false);
+          return;
+        }
+        if (!/[a-zA-Z]/.test(password)) {
+          setError("密码必须包含至少 1 个字母");
+          setLoading(false);
+          return;
+        }
+      }
       const res = await fetch(`${API_BASE}/api/auth/${mode}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, email: `${username}@quant.com` }),
       });
       const data = await res.json();
       if (res.ok && data.access_token) {
@@ -59,6 +76,9 @@ export default function LoginPage() {
           <div>
             <label className="text-xs text-dark-400 block mb-1">{t("auth.password")}</label>
             <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full" />
+            {mode === "register" && (
+              <p className="text-xs text-dark-500 mt-1">密码至少 8 字符，需包含字母和数字</p>
+            )}
           </div>
           <button onClick={handleSubmit} disabled={loading || !username || !password}
             className="btn-primary w-full flex items-center justify-center gap-2 text-sm py-2.5">

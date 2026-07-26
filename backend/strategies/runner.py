@@ -28,7 +28,8 @@ from strategies.base import SignalType
 from db.database import async_session
 from db.models import Strategy, StrategyStatus, StrategyType, RunnerState
 from sqlalchemy import select
-from core.exchange import shared_exchange, ExchangeError
+import core.exchange as exmod
+from core.exchange import ExchangeError
 from core.logger import log
 from core.kill_switch import kill_switch
 from core.tick_cache import tick_cache
@@ -63,14 +64,14 @@ _BALANCE_TTL = 1.0
 
 async def _get_cached_balance() -> dict:
     """带 TTL 的 fetch_balance 缓存（消除多策略并行时的重复请求）"""
-    key = shared_exchange.name
+    key = exmod.shared_exchange.name
     now = time.time()
     if key in _balance_cache:
         ts, bal = _balance_cache[key]
         if now - ts < _BALANCE_TTL:
             return bal
     try:
-        bal = await asyncio.to_thread(shared_exchange.fetch_balance)
+        bal = await asyncio.to_thread(exmod.shared_exchange.fetch_balance)
         _balance_cache[key] = (time.time(), bal)
         return bal
     except Exception as e:
@@ -423,7 +424,7 @@ class StrategyRunner:
 
     async def _detect_regime(self, symbol: str) -> MarketRegime:
         try:
-            df = await asyncio.to_thread(shared_exchange.fetch_ohlcv, symbol, "1h", 200)
+            df = await asyncio.to_thread(exmod.shared_exchange.fetch_ohlcv, symbol, "1h", 200)
             if df is None or df.empty:
                 return MarketRegime.RANGING_LOW_VOL
             return regime_detector.detect(df.to_dict("records"), symbol).regime
@@ -586,7 +587,7 @@ class StrategyRunner:
         # 8. 下单 + 对账
         try:
             order = await asyncio.to_thread(
-                shared_exchange.create_market_order, obj.symbol, side, order_amount
+                exmod.shared_exchange.create_market_order, obj.symbol, side, order_amount
             )
             log.info(f"[RUNNER_ORDER] sid={sid} {side} {order_amount:.6f} "
                      f"(@{current_price:.2f} = ${order_usdt:.2f}) id={order.get('id')}")
@@ -598,7 +599,7 @@ class StrategyRunner:
             if order.get("id"):
                 try:
                     verified = await asyncio.to_thread(
-                        shared_exchange.fetch_order, order["id"], obj.symbol
+                        exmod.shared_exchange.fetch_order, order["id"], obj.symbol
                     )
                     if verified:
                         actual_filled = float(verified.get("filled", 0) or order_amount)
@@ -659,7 +660,7 @@ class StrategyRunner:
                  f"side={close_side} qty={qty:.6f}")
         try:
             order = await asyncio.to_thread(
-                shared_exchange.create_market_order, symbol, close_side, qty
+                exmod.shared_exchange.create_market_order, symbol, close_side, qty
             )
             log.info(f"[RUNNER_CLOSE_DONE] sid={sid} id={order.get('id')} "
                      f"side={close_side} qty={qty:.6f}")
@@ -671,7 +672,7 @@ class StrategyRunner:
             if order.get("id"):
                 try:
                     verified = await asyncio.to_thread(
-                        shared_exchange.fetch_order, order["id"], symbol
+                        exmod.shared_exchange.fetch_order, order["id"], symbol
                     )
                     if verified:
                         actual_filled = float(verified.get("filled", 0) or qty)

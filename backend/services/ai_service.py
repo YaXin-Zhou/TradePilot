@@ -3,7 +3,7 @@ import math
 import uuid
 from datetime import datetime
 import httpx
-from core.exchange import shared_exchange as _exchange
+import core.exchange as exmod
 from config import settings
 from core.logger import log
 from strategies.ai_strategy import AIStrategyEngine
@@ -50,8 +50,8 @@ async def analyze_market(
         return {"success": False, "error": "DeepSeek API Key 未配置，请在 .env 中设置 DEEPSEEK_API_KEY"}
 
     # 1. 获取市场数据
-    ticker = _exchange.fetch_ticker(symbol)
-    df = _exchange.fetch_ohlcv(symbol, timeframe, limit=100)
+    ticker = exmod.shared_exchange.fetch_ticker(symbol)
+    df = exmod.shared_exchange.fetch_ohlcv(symbol, timeframe, limit=100)
     df_feat = _fe.compute_features(df)
 
     if df_feat.empty:

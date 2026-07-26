@@ -11,6 +11,8 @@ import os
 import time
 from typing import Optional
 
+import pandas as pd
+
 
 class ExchangeError(Exception):
     pass
@@ -100,8 +102,9 @@ class ExchangeClient:
             self._connected = True
             log.debug(f"ExchangeClient: markets loaded from {self._exchange.hostname}")
         except Exception as e:
-            self._last_attempt = time.time()
+            # FIX: 不重置 _last_attempt，避免干扰 _try_reconnect 的指数退避
             self._markets_loaded = False
+            self._connected = False
             log.warning(f"ExchangeClient: load_markets failed from {self._exchange.hostname}: {e}")
 
     def _try_reconnect(self) -> bool:
@@ -112,15 +115,24 @@ class ExchangeClient:
         # 当前退避间隔
         interval = self._RECONNECT_INTERVALS[min(self._reconnect_idx, len(self._RECONNECT_INTERVALS) - 1)]
         if now - self._last_attempt >= interval:
+            original_timeout = self._exchange.timeout
             try:
+                # 加 5 秒超时，防止 DNS 查询无限等待
+                self._exchange.timeout = min(5000, original_timeout)
                 self._exchange.load_markets()
                 self._markets_loaded = True
                 self._connected = True
                 self._reconnect_idx = 0  # 重置退避
                 return True
-            except Exception:
+            except Exception as e:
+                # 快速失败，记录但不抛出
+                from core.logger import log
+                log.debug(f"Exchange reconnect attempt {self._reconnect_idx + 1} failed: {type(e).__name__}")
                 self._last_attempt = now
                 self._reconnect_idx = min(self._reconnect_idx + 1, len(self._RECONNECT_INTERVALS) - 1)
+            finally:
+                # FIX: 恢复原始 timeout，避免永久降低后续请求的 timeout
+                self._exchange.timeout = original_timeout
         return self._connected
 
     def _mark_success(self):
@@ -136,6 +148,11 @@ class ExchangeClient:
     @property
     def name(self) -> str:
         return self._name
+
+    @property
+    def is_connected(self) -> bool:
+        """是否已连接（修复 BUG-6：main.py 访问 _connected 私有属性）"""
+        return self._connected
 
     @property
     def is_testnet(self) -> bool:
@@ -402,3 +419,12 @@ shared_exchange = ExchangeClient(
     passphrase=settings.EXCHANGE_PASSPHRASE,
     testnet=settings.EXCHANGE_TESTNET,
 )
+
+
+def get_shared() -> ExchangeClient:
+    """动态获取 shared_exchange 实例。
+
+    用于热重建场景：settings API 保存新 API Key 后会替换 shared_exchange，
+    旧引用（模块加载时的快照）会失效。所有模块应改用此函数获取实例。
+    """
+    return shared_exchange

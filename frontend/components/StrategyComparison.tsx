@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { BarChart3, TrendingUp, TrendingDown, Minus, ShieldAlert } from "lucide-react";
 import { useLanguage } from "../lib/LanguageContext";
 import { useStrategies } from "../lib/swr-config";
@@ -10,6 +10,9 @@ export default function StrategyComparison() {
   const { t } = useLanguage();
   const { data: strategies, isLoading } = useStrategies();
   const [sortKey, setSortKey] = useState<SortKey>("sharpe");
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => { setMounted(true); }, []);
 
   const sorted = useMemo(() => {
     if (!strategies || strategies.length === 0) return null;
@@ -28,7 +31,7 @@ export default function StrategyComparison() {
     return arr;
   }, [strategies, sortKey]);
 
-  if (isLoading) return <Skeleton height={200} />;
+  if (!mounted || isLoading) return <Skeleton height={200} />;
   if (!sorted || sorted.length === 0) return null;
 
   const active = sorted.filter((s) => s.status !== "draft");

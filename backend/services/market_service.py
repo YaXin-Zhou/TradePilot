@@ -1,8 +1,13 @@
 """行情数据服务层"""
 import time
 import random
-from core.exchange import shared_exchange
+import core.exchange as exmod
 from core.logger import log
+
+
+def _get_exchange():
+    """动态获取 shared_exchange 实例（避免热重建后引用过期）"""
+    return exmod.shared_exchange
 
 
 def _mock_ticker(symbol="BTC/USDT"):
@@ -55,7 +60,7 @@ def _mock_orderbook(limit=20):
 def get_ticker(symbol: str) -> tuple[dict, bool]:
     """获取行情。返回 (data, is_mock)"""
     try:
-        ticker = shared_exchange.fetch_ticker(symbol)
+        ticker = _get_exchange().fetch_ticker(symbol)
         return ticker, False
     except Exception as e:
         log.warning(f"Ticker fetch failed for {symbol}: {e}")
@@ -65,7 +70,7 @@ def get_ticker(symbol: str) -> tuple[dict, bool]:
 def get_ohlcv(symbol: str, timeframe: str, limit: int) -> tuple[list, bool]:
     """获取 K 线。返回 (data, is_mock)"""
     try:
-        df = shared_exchange.fetch_ohlcv(symbol, timeframe, limit)
+        df = _get_exchange().fetch_ohlcv(symbol, timeframe, limit)
         return df.to_dict(orient="records"), False
     except Exception as e:
         log.warning(f"OHLCV fetch failed for {symbol}: {e}")
@@ -75,7 +80,7 @@ def get_ohlcv(symbol: str, timeframe: str, limit: int) -> tuple[list, bool]:
 def get_orderbook(symbol: str, limit: int) -> tuple[dict, bool]:
     """获取订单簿。返回 (data, is_mock)"""
     try:
-        ob = shared_exchange.fetch_orderbook(symbol, limit)
+        ob = _get_exchange().fetch_orderbook(symbol, limit)
         return ob, False
     except Exception as e:
         log.warning(f"Orderbook fetch failed for {symbol}: {e}")

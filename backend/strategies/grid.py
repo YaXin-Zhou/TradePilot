@@ -24,8 +24,8 @@ class GridStrategy(BaseStrategy):
         upper = config.get("upper_bound")
         if lower is None or upper is None:
             try:
-                from core.exchange import shared_exchange
-                t = shared_exchange.fetch_ticker(self.symbol)
+                import core.exchange as exmod
+                t = exmod.shared_exchange.fetch_ticker(self.symbol)
                 p = t.get("last", 86500)
                 lower = p * 0.9
                 upper = p * 1.1

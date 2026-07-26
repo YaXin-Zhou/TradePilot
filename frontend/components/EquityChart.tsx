@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import {
   ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend
@@ -25,6 +25,10 @@ function formatDate(iso: string): string {
 export default function EquityChart() {
   const { t } = useLanguage();
   const { data: perf, isLoading } = usePerformance();
+  const [mounted, setMounted] = useState(false);
+
+  // 首次渲染始终与 SSR 一致（Skeleton），避免 hydration mismatch
+  useEffect(() => { setMounted(true); }, []);
 
   const chartData = useMemo(() => {
     if (!perf?.pnl_curve || perf.pnl_curve.length === 0) return null;
@@ -41,7 +45,8 @@ export default function EquityChart() {
     });
   }, [perf]);
 
-  if (isLoading) return <Skeleton height={280} />;
+  // mounted 为 false 时，始终渲染 Skeleton（与 SSR 输出一致）
+  if (!mounted || isLoading) return <Skeleton height={280} />;
 
   if (!chartData) {
     return (

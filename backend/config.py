@@ -1,9 +1,12 @@
 """
 AI 量化交易系统 - 全局配置
 """
+from __future__ import annotations
+
 from dotenv import load_dotenv
 import os
 from pathlib import Path
+from typing import Optional
 
 # Load .env from backend directory
 load_dotenv(Path(__file__).parent / ".env")

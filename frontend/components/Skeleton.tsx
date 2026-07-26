@@ -9,6 +9,21 @@ function Pulse({ className = "" }: SkeletonProps) {
   return <div className={`animate-pulse bg-[#1a1a1a] rounded ${className}`} />;
 }
 
+/** 通用骨架屏 — 用于图表/卡片占位 */
+interface GenericSkeletonProps {
+  height?: number;
+  className?: string;
+}
+
+export default function Skeleton({ height = 200, className = "" }: GenericSkeletonProps) {
+  return (
+    <div className={`bg-[#0e0e0e] rounded-lg p-4 border border-[#1a1a1a] ${className}`}>
+      <Pulse className="h-4 w-32 mb-4" />
+      <Pulse className="w-full" style={{ height }} />
+    </div>
+  );
+}
+
 /** 仪表盘骨架屏 */
 export function DashboardSkeleton() {
   return (

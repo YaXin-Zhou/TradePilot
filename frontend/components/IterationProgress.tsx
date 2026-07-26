@@ -1,4 +1,5 @@
 import { Brain, RefreshCw, CheckCircle, XCircle } from "lucide-react";
+import { useState, useEffect } from "react";
 import useSWR from "swr";
 import { api } from "../lib/api";
 import { useLanguage } from "../lib/LanguageContext";
@@ -27,9 +28,12 @@ function useIterationTasks() {
 export default function IterationProgress() {
   const { t, lang } = useLanguage();
   const { data: tasks, isLoading } = useIterationTasks();
+  const [mounted, setMounted] = useState(false);
   const isZh = lang === "zh";
 
-  if (isLoading) return <Skeleton height={120} />;
+  useEffect(() => { setMounted(true); }, []);
+
+  if (!mounted || isLoading) return <Skeleton height={120} />;
   if (!tasks || tasks.length === 0) return null;
 
   const inProgress = tasks.filter((t) => t.status === "running" || t.status === "pending");

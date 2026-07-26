@@ -1,4 +1,6 @@
 """密钥加密/解密模块 — 基于 Fernet (AES-128-CBC + HMAC)"""
+from __future__ import annotations
+
 import os
 import base64
 import logging

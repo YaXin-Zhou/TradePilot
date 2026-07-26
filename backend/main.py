@@ -7,9 +7,11 @@
 """
 import sys
 import os
-import time as _time
-import signal as _signal
+import time
+import signal
 import asyncio
+import math
+import json as _json
 from contextlib import asynccontextmanager
 
 # 确保 backend 在 path 中
@@ -60,16 +62,23 @@ async def lifespan(app: FastAPI):
 
     # Phase 8: 启动时主动测试交易所连通性（线程池执行，不阻塞 event loop）
     # 避免前端始终显示"模拟模式—交易所连接不可用"
+    # v2.1: 尽力而为，连接失败不影响启动（后续自动重试）
     try:
-        import asyncio as _asyncio
         from core.exchange import shared_exchange
-        await _asyncio.to_thread(shared_exchange.connect_with_retry, 3)
-        if shared_exchange.is_connected:
-            log.info("Exchange connectivity verified on startup")
-        else:
-            log.warning("Exchange connectivity test failed — will retry on first /status poll")
+        async def _test_exchange():
+            try:
+                await asyncio.to_thread(shared_exchange.connect_with_retry, 3)
+                if shared_exchange.is_connected:
+                    log.info("Exchange connectivity verified on startup")
+                else:
+                    log.warning("Exchange offline on startup — will retry automatically")
+            except Exception as e:
+                log.warning(f"Exchange startup test failed (non-fatal): {e}")
+        await asyncio.wait_for(_test_exchange(), timeout=15)  # 最多等 15 秒
+    except asyncio.TimeoutError:
+        log.warning("Exchange connectivity test timed out (non-fatal)")
     except Exception as e:
-        log.warning(f"Exchange startup connectivity test error (non-fatal): {e}")
+        log.warning(f"Exchange startup test error (non-fatal): {e}")
 
     # P0-1: kill_switch + risk_engine 从 DB 加载状态
     await kill_switch.init_from_db()
@@ -106,7 +115,7 @@ async def lifespan(app: FastAPI):
 
     # === v1.1 优雅关闭 ===
     log.info("Shutting down gracefully...")
-    _shutdown_start = _time.time()
+    _shutdown_start = time.time()
 
     # 1. 停止调度器（不再触发新任务）
     try:
@@ -131,13 +140,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.error(f"DB close error: {e}")
 
-    elapsed = _time.time() - _shutdown_start
+    elapsed = time.time() - _shutdown_start
     log.info(f"Application shut down ({elapsed:.1f}s)")
 
 
 # ──── 自定义 JSON 响应：NaN/Inf → null ────
-import math
-import json as _json
 from starlette.responses import JSONResponse as _JSONResponse
 
 
@@ -233,7 +240,7 @@ async def health_deep():
     """
     result = {
         "status": "ok",
-        "timestamp": _time.time(),
+        "timestamp": time.time(),
         "checks": {},
         "exchange": settings.EXCHANGE_NAME,
         "trade_mode": settings.EXCHANGE_TRADE_MODE,
@@ -246,9 +253,9 @@ async def health_deep():
     try:
         from sqlalchemy import text
         async with async_session() as session:
-            start = _time.time()
+            start = time.time()
             await session.execute(text("SELECT 1"))
-            db_latency = int((_time.time() - start) * 1000)
+            db_latency = int((time.time() - start) * 1000)
         result["checks"]["database"] = {"ok": True, "latency_ms": db_latency}
     except Exception as e:
         result["checks"]["database"] = {"ok": False, "error": str(e)}
@@ -257,7 +264,7 @@ async def health_deep():
     # 2. 交易所连通性
     try:
         from core.exchange import shared_exchange
-        start = _time.time()
+        start = time.time()
         ok, msg, latency = shared_exchange.test_connection()
         result["checks"]["exchange"] = {
             "ok": ok,

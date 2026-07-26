@@ -2,7 +2,8 @@
 import asyncio
 import logging
 from fastapi import APIRouter
-from core.exchange import ExchangeClient, ExchangeError, shared_exchange as _exchange
+from core.exchange import ExchangeClient, ExchangeError
+import core.exchange as exmod
 from core.redis import get_redis
 from config import settings
 import time
@@ -13,6 +14,11 @@ router = APIRouter(prefix="/api/exchange", tags=["exchange"])
 # Redis key for cross-worker exchange status sharing
 _EXCHANGE_STATUS_KEY = "exchange:connected"
 _EXCHANGE_STATUS_TTL = 10  # 10 秒过期，每轮询刷新一次
+
+
+def _get_exchange():
+    """动态获取 shared_exchange 实例（避免热重建后引用过期）"""
+    return exmod.shared_exchange
 
 
 @router.get("/status")
@@ -30,14 +36,26 @@ async def exchange_status():
     except Exception:
         pass
 
-    # 本地未连接则尝试连接（线程池，不阻塞 event loop）
-    if not _exchange._connected:
-        try:
-            await asyncio.to_thread(_exchange._ensure_markets)
-        except Exception as e:
-            logger.warning(f"Exchange auto-connect failed: {e}")
+    # 动态获取最新实例（可能在 settings API 中被热重建过）
+    _exchange = _get_exchange()
 
-    connected = _exchange._connected
+    # 本地未连接则尝试实际探测（不依赖 _connected 标志位）
+    # FIX: 直接调用 ccxt 原始 fetch_ticker，绕过 ExchangeClient._try_reconnect()
+    # 的退避守卫。否则退避期内（1s~60s）探测会直接被拦截，导致 /status
+    # 永远返回 offline，即使网络已恢复。
+    connected = _exchange.is_connected
+    latency_ms = None
+    if not connected:
+        try:
+            t0 = time.time()
+            await asyncio.to_thread(_exchange._exchange.fetch_ticker, settings.DEFAULT_SYMBOL)
+            latency_ms = int((time.time() - t0) * 1000)
+            connected = True
+            # 探测成功，更新标志位
+            _exchange._mark_success()
+            logger.info(f"Exchange status probe OK ({latency_ms}ms)")
+        except Exception as e:
+            logger.warning(f"Exchange status probe failed: {e}")
 
     # 连接成功则写入 Redis 广播给其他 worker
     if connected:
@@ -54,7 +72,7 @@ async def exchange_status():
         "testnet": settings.EXCHANGE_TESTNET,
         "has_api_key": bool(settings.EXCHANGE_API_KEY),
         "last_error": None,
-        "latency_ms": None,
+        "latency_ms": latency_ms,
     }
     return {"success": True, "data": result}
 

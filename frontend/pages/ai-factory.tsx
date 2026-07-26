@@ -38,8 +38,8 @@ export default function AIFactoryPage() {
   // 迭代优化状态
   const [iterating, setIterating] = useState(false);
   const [iterTaskId, setIterTaskId] = useState<string | null>(null);
-  const [iterProgress, setIterProgress] = useState<Record<string, any> | null>(null);
-  const [iterBest, setIterBest] = useState<Record<string, any> | null>(null);
+  const [iterProgress, setIterProgress] = useState<IterationTaskDetail | null>(null);
+  const [iterBest, setIterBest] = useState<IterationVariant | null>(null);
   const [iterError, setIterError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const iterTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -49,18 +49,18 @@ export default function AIFactoryPage() {
     if (!iterBest || !result) return;
     setSaving(true);
     try {
-      const res: any = await api.saveIterationToWarehouse({
+      const res = await api.saveIterationToWarehouse({
         strategy_type: iterBest.strategy_type,
-        params: iterBest.params,
+        params: iterBest.params as Record<string, unknown>,
         symbol,
         metrics: {
-          sharpe_oos: iterBest.sharpe_oos,
-          max_drawdown_pct: iterBest.max_drawdown_pct,
-          win_rate: iterBest.win_rate,
-          total_trades: iterBest.total_trades,
-          total_return_pct: iterBest.total_return_pct,
+          sharpe_oos: iterBest.sharpe_oos as number,
+          max_drawdown_pct: iterBest.max_drawdown_pct as number,
+          win_rate: iterBest.win_rate as number,
+          total_trades: iterBest.total_trades as number,
+          total_return_pct: iterBest.total_return_pct as number,
         },
-      });
+      }) as { strategy_id?: string; name?: string; error?: string };
       if (res?.strategy_id) {
         setIterError(null);
         alert(`策略已保存到策略库: ${res.name}`);
@@ -138,13 +138,13 @@ export default function AIFactoryPage() {
   const pollIteration = useCallback((taskId: string) => {
     const poll = async () => {
       try {
-        const s: any = await api.getIterationStatus(taskId);
+        const s = await api.getIterationStatus(taskId) as IterationTaskDetail;
         // s 是解包后的 data 对象：{task_id, status, current_round, ...}
         if (!s || !s.task_id) return;
         
         setIterProgress(s);
         if (s.status === "completed" || s.status === "converged") {
-          const b: any = await api.getIterationBest(taskId);
+          const b = await api.getIterationBest(taskId) as IterationVariant;
           if (b) {
             setIterBest(b);
             setIterating(false);
@@ -171,7 +171,7 @@ export default function AIFactoryPage() {
   }, []);
 
   // 合格标准检测
-  const isQualified = (v: Record<string, any> | null) => {
+  const isQualified = (v: IterationVariant | null) => {
     if (!v) return false;
     return (v.sharpe_oos ?? 0) >= 1.0 && (v.pbo ?? 1) <= 0.3 && (v.max_drawdown_pct ?? 100) <= 15;
   };

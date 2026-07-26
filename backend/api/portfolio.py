@@ -8,7 +8,7 @@ from services.portfolio_service import (
 )
 from services.portfolio_allocator import portfolio_allocator
 from services.trading_service import place_market_order
-from core.exchange import shared_exchange
+import core.exchange as exmod
 from core.logger import log
 from auth.deps import get_current_user
 
@@ -66,7 +66,7 @@ async def close_position(req: ClosePositionRequest, _user: dict = Depends(get_cu
 
     # 获取当前持仓数量
     try:
-        balance = shared_exchange.fetch_balance()
+        balance = exmod.shared_exchange.fetch_balance()
         qty = float(balance.get(asset, {}).get("total", 0) or 0)
         if qty <= 0:
             return {"success": False, "error": f"无 {asset} 持仓"}
