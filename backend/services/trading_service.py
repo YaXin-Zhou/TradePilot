@@ -1,4 +1,4 @@
-"""交易服务层 — Phase 8 实盘就绪版
+"""交易服务层 — Phase 8 实盘就绪版 (v2.0 合约版) (v2.0 合约版)
 
 核心改动：
   1. 移除所有 mock fallback（下单失败抛错，不再返回假单掩盖故障）
@@ -19,6 +19,26 @@ from core.logger import log
 from core.kill_switch import kill_switch
 from config import settings
 from services.regime_detector import MarketRegime  # kept for runner compatibility
+from services.risk_engine import risk_engine  # v2.0: manual trading risk
+
+async def _check_risk_engine(symbol: str, side: str, amount_usdt: float) -> tuple[bool, str]:
+    """v2.0: manual trading risk check using risk_engine position limits."""
+    try:
+        from services.market_service import get_ohlcv
+        ohlcv, _ = get_ohlcv(symbol, "1h", limit=200)
+        if ohlcv:
+            from services.regime_detector import regime_detector, MarketRegime
+            regime = regime_detector.detect(ohlcv, symbol)
+            r = risk_engine.check_position_limit(
+                regime=regime, total_capital=10000,
+                current_position=0, new_amount=amount_usdt, strategy_position=0,
+            )
+            if not r.passed:
+                return False, r.reason
+        return True, ""
+    except Exception as e:
+        log.warning(f"RiskEngine check skipped: {e}")
+        return True, ""
 from db.database import async_session
 from db.models import Order, AuditLog, OrderType, OrderStatus, StrategyType
 

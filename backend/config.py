@@ -42,6 +42,10 @@ class Settings:
     # 加密密钥 (Fernet AES)
     ENCRYPTION_KEY: str = os.getenv("ENCRYPTION_KEY", "")
 
+    # Telegram (optional, empty = disabled)
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_CHAT_ID: str = ""
+
     # AI
     DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
 

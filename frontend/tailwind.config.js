@@ -1,7 +1,7 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: [
-    "./pages/**/*.{js,ts,jsx,tsx}",
+    "./pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./components/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
@@ -38,6 +38,5 @@ module.exports = {
     },
   },
   plugins: [],
+  safelist: ["text-green", "text-red", "text-okx-yellow", "text-dark-400", "text-dark-200", "text-dark-500", "text-white", "bg-dark-800", "bg-dark-900", "border-dark-800"],
 };
-
-/* rebuild */

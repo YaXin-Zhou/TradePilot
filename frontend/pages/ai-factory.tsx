@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { api } from "../lib/api";
 import { Brain, Zap, RefreshCw, TrendingUp, BarChart3, Target, Shield, Activity, Sparkles, CheckCircle, XCircle, AlertTriangle } from "lucide-react";
 import type { AiAnalyzeResult, AiAnalyzeRequest } from "../types/strategy";
+import IterationProgress from "../components/IterationProgress";
 import type { ApiError } from "../types/api";
 import { asApiError } from "../types/api";
 import type { IterationTaskDetail, IterationVariant } from "../types/ai-lab";

@@ -7,19 +7,9 @@ Phase 8 修复：
   - 所有操作成功后正确标记 connected
 """
 import ccxt
-import pandas as pd
 import os
 import time
 from typing import Optional
-
-
-# Global connectivity flag (shared across instances)
-_connected: bool = True  # NOTE: managed by ExchangeClient._connected now
-
-
-def set_connected(value: bool):
-    global _connected
-    _connected = value
 
 
 class ExchangeError(Exception):
@@ -30,7 +20,7 @@ class ExchangeClient:
     """统一交易所接口，默认 OKX"""
 
     # 指数退避重连间隔（秒），上限 60s
-    _RECONNECT_INTERVALS = [3, 6, 12, 24, 60]
+    _RECONNECT_INTERVALS = [1, 2, 4, 8, 15, 30, 60]
 
     def __init__(
         self,
@@ -44,7 +34,7 @@ class ExchangeClient:
         params = {
             "enableRateLimit": True,
             "timeout": 8000,
-            "options": {"defaultType": "spot"},
+            "options": {"defaultType": "swap"},
         }
         # Auto-detect proxy from env vars
         proxy_url = (
@@ -55,7 +45,7 @@ class ExchangeClient:
         )
         if proxy_url:
             params["proxies"] = {"http": proxy_url, "https": proxy_url}
-            params["timeout"] = 10000
+            params["timeout"] = 15000
         if api_key and secret:
             params["apiKey"] = api_key
             params["secret"] = secret
@@ -74,6 +64,32 @@ class ExchangeClient:
         self._name = exchange_name
         self._last_attempt = 0.0
         self._reconnect_idx = 0  # 指数退避索引
+
+
+    # ---- Connection lifecycle ----
+
+    def connect_with_retry(self, max_retries: int = 3) -> bool:
+        """启动时主动连接，短间隔重试（1s/2s/4s）。
+
+        返回 True 表示连接成功，False 表示全部失败。
+        """
+        import time as _t
+        for attempt in range(max_retries):
+            try:
+                self._exchange.load_markets()
+                self._markets_loaded = True
+                self._connected = True
+                self._reconnect_idx = 0
+                self._last_attempt = _t.time()
+                log.info(f"ExchangeClient: connected on attempt {attempt + 1}/{max_retries}")
+                return True
+            except Exception as e:
+                wait = 2 ** attempt
+                log.warning(f"ExchangeClient: attempt {attempt + 1}/{max_retries} failed ({e}), retry in {wait}s")
+                _t.sleep(wait)
+        self._last_attempt = _t.time()
+        log.error("ExchangeClient: all startup connection attempts failed")
+        return False
 
     def _ensure_markets(self):
         if self._markets_loaded:

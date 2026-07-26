@@ -23,6 +23,23 @@ const NAV_ITEMS = [
   { label: "nav.settings", icon: Settings, href: "/settings", color: "#848e9c" },
 ];
 
+
+function SymbolSelector() {
+  const { currentSymbol, setCurrentSymbol } = useAppStore();
+  const symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT"];
+  return (
+    <select
+      value={currentSymbol}
+      onChange={(e) => setCurrentSymbol(e.target.value)}
+      className="w-full bg-dark-800 border border-dark-700 rounded-lg px-2 py-1.5 text-xs text-dark-200 focus:outline-none focus:border-okx-blue"
+    >
+      {symbols.map((s) => (
+        <option key={s} value={s}>{s}</option>
+      ))}
+    </select>
+  );
+}
+
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -103,6 +120,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           )}
         </div>
 
+        {/* Symbol Selector */}
+        {!collapsed && (
+          <div className="px-3 py-2 border-b border-dark-800">
+            <SymbolSelector />
+          </div>
+        )}
         {/* Nav */}
         <nav className="flex-1 py-3 px-2 space-y-1 overflow-y-auto">
           {NAV_ITEMS.map((item) => {

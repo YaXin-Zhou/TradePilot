@@ -36,6 +36,7 @@ from config import settings
 from services.regime_detector import regime_detector, MarketRegime
 from services.risk_engine import risk_engine
 from services.strategy_log import append as log_event
+from services.alert_service import alert_service
 from services.stop_loss import StopLossManager, StopLossConfig
 from services.portfolio_allocator import portfolio_allocator
 

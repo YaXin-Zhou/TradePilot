@@ -63,8 +63,8 @@ async def lifespan(app: FastAPI):
     try:
         import asyncio as _asyncio
         from core.exchange import shared_exchange
-        await _asyncio.to_thread(shared_exchange._ensure_markets)
-        if shared_exchange._connected:
+        await _asyncio.to_thread(shared_exchange.connect_with_retry, 3)
+        if shared_exchange.is_connected:
             log.info("Exchange connectivity verified on startup")
         else:
             log.warning("Exchange connectivity test failed — will retry on first /status poll")
@@ -218,9 +218,10 @@ async def health():
     return {
         "status": "ok",
         "exchange": settings.EXCHANGE_NAME,
+        "trade_mode": settings.EXCHANGE_TRADE_MODE,
         "testnet": settings.EXCHANGE_TESTNET,
         "kill_switch": kill_switch.get_state()["status"],
-        "version": "1.1.0",
+        "version": "1.2.0",
     }
 
 
@@ -235,6 +236,7 @@ async def health_deep():
         "timestamp": _time.time(),
         "checks": {},
         "exchange": settings.EXCHANGE_NAME,
+        "trade_mode": settings.EXCHANGE_TRADE_MODE,
         "testnet": settings.EXCHANGE_TESTNET,
         "kill_switch": kill_switch.get_state()["status"],
         "mode": "TESTNET" if settings.EXCHANGE_TESTNET else "LIVE",

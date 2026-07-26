@@ -1,6 +1,8 @@
 import { useState } from "react";
 import PortfolioSummary from "../components/PortfolioSummary";
 import PriceChart, { LiveTicker } from "../components/PriceChart";
+import EquityChart from "../components/EquityChart";
+import RiskDashboard from "../components/RiskDashboard";
 import { useLanguage } from "../lib/LanguageContext";
 import { useRealtime } from "../lib/useRealtime";
 import { useMarketRegime, useIndicators, usePrediction, useTradeHistory } from "../lib/swr-config";
@@ -48,6 +50,8 @@ export default function Dashboard() {
       </div>
 
       <PortfolioSummary refreshKey={0} />
+
+      <EquityChart />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">

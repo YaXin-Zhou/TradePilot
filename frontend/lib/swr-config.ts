@@ -5,7 +5,7 @@ import { api, getToken } from "./api";
 /** 默认 SWR 配置 */
 export const swrConfig: SWRConfiguration = {
   revalidateOnFocus: true,
-  revalidateOnReconnect: true,
+  revalidateOnReconnect: true,`r`n  revalidateOnMount: true,`r`n  keepPreviousData: true,
   errorRetryCount: 3,
   errorRetryInterval: 5000,
 };
@@ -58,6 +58,18 @@ export function usePrediction(symbol: string = "BTC/USDT") {
 
 export function useTradeHistory(limit: number = 20) {
   return useMarketData(() => api.getTradeHistory(limit), `trades:${limit}`, 30000, true);
+}
+
+
+/** Phase 8: 策略绩效（PnL曲线+统计） */
+
+/** Phase 8: 策略列表 */
+export function useStrategies() {
+  return useMarketData(() => api.listStrategies(), "strategies:list", 30000, true);
+}
+
+export function usePerformance() {
+  return useMarketData(() => api.getPerformance(), "portfolio:performance", 60000, true);
 }
 
 export function useExchangeStatus() {

@@ -14,6 +14,8 @@ from typing import Set
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import websockets
 
+from config import settings
+
 router = APIRouter()
 
 
@@ -93,7 +95,9 @@ class TickerFanOut:
     async def _upstream_loop(self):
         """维护到 OKX 的 WS 连接，指数退避重连"""
         url = "wss://ws.okx.com:8443/ws/v5/public"
-        sub = {"op": "subscribe", "args": [{"channel": "tickers", "instId": "BTC-USDT"}]}
+        okx_inst = settings.DEFAULT_SYMBOL.replace("BTC/USDT", "BTC-USDT-SWAP").replace("ETH/USDT", "ETH-USDT-SWAP")
+
+        sub = {"op": "subscribe", "args": [{"channel": "tickers", "instId": okx_inst}]}
         reconnect_idx = 0
         sim = SimulatedPriceEngine()
 

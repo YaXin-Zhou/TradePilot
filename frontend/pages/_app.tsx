@@ -1,6 +1,7 @@
 import type { AppProps } from "next/app";
 import { useRouter } from "next/router";
 import Layout from "../components/Layout";
+import ErrorBoundary from "../components/ErrorBoundary";
 import { LanguageProvider } from "../lib/LanguageContext";
 import { Toaster } from "react-hot-toast";
 import "../styles/globals.css";
@@ -12,6 +13,7 @@ export default function App({ Component, pageProps }: AppProps) {
   const isLoginPage = router.pathname === "/login";
 
   return (
+    <ErrorBoundary>
     <LanguageProvider>
       {isLoginPage ? (
         <>
@@ -41,5 +43,6 @@ export default function App({ Component, pageProps }: AppProps) {
         </Layout>
       )}
     </LanguageProvider>
+    </ErrorBoundary>
   );
 }

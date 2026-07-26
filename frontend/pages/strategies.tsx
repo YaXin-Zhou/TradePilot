@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "../lib/api";
+import StrategyComparison from "../components/StrategyComparison";
 import { useLanguage } from "../lib/LanguageContext";
 import { Plus, Play, Square, BarChart3, Trash2, Layers, Zap, Moon, TrendingUp, ScrollText, ChevronDown, ChevronUp, Shield } from "lucide-react";
 
@@ -128,6 +129,8 @@ export default function StrategiesPage() {
           <Plus size={16} /> {t("strat.new")}
         </button>
       </div>
+
+      <StrategyComparison />
 
       {/* Pool Summary Cards */}
       {poolSummary && (

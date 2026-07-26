@@ -374,18 +374,52 @@ def _parse_variants(content: str) -> list[dict]:
 
 
 def _validate_variants(items: list) -> list[dict]:
-    """过滤有效变体"""
+    """过滤有效变体 — 宽松验证 + 自动补全默认参数"""
     if not isinstance(items, list):
+        log.warning(f"_validate_variants: expected list, got {type(items).__name__}")
         return []
     result = []
-    for item in items:
+    for i, item in enumerate(items):
         if not isinstance(item, dict):
+            log.warning(f"_validate_variants: item[{i}] is not dict, got {type(item).__name__}")
             continue
-        st = item.get("strategy_type", "").lower()
-        if st in ("ma_crossover", "rsi", "bollinger", "ma_cross"):
-            if st == "ma_cross":
-                item["strategy_type"] = "ma_crossover"
-            result.append(item)
+
+        st = item.get("strategy_type", "").lower().strip()
+        if st in ("ma_cross", "sma_cross"):
+            st = "ma_crossover"
+            item["strategy_type"] = st
+
+        if st not in ("ma_crossover", "rsi", "bollinger"):
+            log.warning(f"_validate_variants: item[{i}] unknown strategy_type='{st}', skipped. Keys: {list(item.keys())}")
+            continue
+
+        # 自动补全缺失的 params
+        if "params" not in item or not isinstance(item.get("params"), dict):
+            item["params"] = {}
+        params = item["params"]
+
+        if st == "ma_crossover":
+            params.setdefault("fast", 10)
+            params.setdefault("slow", 30)
+        elif st == "rsi":
+            params.setdefault("period", 14)
+            params.setdefault("oversold", 30)
+            params.setdefault("overbought", 70)
+        elif st == "bollinger":
+            params.setdefault("period", 20)
+            params.setdefault("std_dev", 2.0)
+
+        # 自动补全缺失的 rationale
+        if "rationale" not in item:
+            item["rationale"] = f"Auto-generated {st} variant"
+
+        result.append(item)
+
+    if not result and items:
+        log.warning(
+            f"_validate_variants: all {len(items)} items filtered out. "
+            f"Sample keys: {[list(it.keys()) if isinstance(it, dict) else type(it).__name__ for it in items[:3]]}"
+        )
     return result
 
 
@@ -667,12 +701,23 @@ async def _run_round(
         content = await _call_deepseek(prompt, system_prompt, max_tokens=3000)
         variants_raw = _parse_variants(content)
         ai_used = bool(variants_raw)
+        if not ai_used:
+            log.warning(
+                f"Iteration {task_id} round {round_num}: AI returned response but "
+                f"_parse_variants produced 0 valid variants. "
+                f"Response length={len(content)}, preview={content[:200]}"
+            )
     except Exception as e:
-        log.warning(f"Iteration {task_id} AI call failed ({e}), falling back to random search")
+        log.warning(f"Iteration {task_id} round {round_num}: AI call failed ({e}), falling back to random search")
 
     if not variants_raw:
         # 确定性回退：在合理参数范围内随机搜索
         variants_raw = _generate_random_variants(variants_count)
+        if not variants_raw:
+            log.error(f"Iteration {task_id} round {round_num}: _generate_random_variants also returned empty! "
+                      f"variants_count={variants_count}")
+            variants_raw = [{"strategy_type": "ma_crossover", "params": {"fast": 10, "slow": 30},
+                            "rationale": "Emergency fallback"}]  # 终极兜底
         log.info(f"Iteration {task_id} round {round_num}: AI failed, using {len(variants_raw)} random variants")
     else:
         log.info(f"Iteration {task_id} round {round_num}: AI generated {len(variants_raw)} variants")
