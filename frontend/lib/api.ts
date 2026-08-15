@@ -1,4 +1,4 @@
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8001";
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 // Import toast - note: this module is evaluated before React hydrates, use dynamic import in pages
 type ToastModule = typeof import("react-hot-toast");
