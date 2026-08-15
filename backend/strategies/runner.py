@@ -50,6 +50,11 @@ INSTANCE_ID = f"{socket.gethostname()}:{os.getpid()}"
 LOCK_TTL_SECONDS = 60  # 锁过期时间：60s（超过则其他实例可抢占）
 
 
+def _db_supports_row_lock() -> bool:
+    """PostgreSQL 支持 SELECT ... FOR UPDATE（行级锁），SQLite 不支持"""
+    return "postgresql" in settings.DATABASE_URL.lower()
+
+
 def _utcnow_naive() -> datetime:
     """统一返回 naive UTC datetime（与 DB TIMESTAMP WITHOUT TIME ZONE 兼容）"""
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -233,9 +238,11 @@ class StrategyRunner:
         """
         try:
             async with async_session() as session:
-                r = await session.execute(
-                    select(RunnerState).where(RunnerState.strategy_id == sid)
-                )
+                # v2.0: 行级锁（FOR UPDATE）保证"读-改-写"原子，防多实例重复获取
+                stmt = select(RunnerState).where(RunnerState.strategy_id == sid)
+                if _db_supports_row_lock():
+                    stmt = stmt.with_for_update()
+                r = await session.execute(stmt)
                 row = r.scalar_one_or_none()
                 now = _utcnow_naive()
                 lock_expires = now + timedelta(seconds=LOCK_TTL_SECONDS)
@@ -704,11 +711,12 @@ class StrategyRunner:
         await self._persist_state(sid)
 
     async def _close_position(self, sid: str, symbol: str, side: str):
-        """平仓"""
+        """平仓（v2.0: 部分成交时保留剩余仓位）"""
         qty = self._positions_qty.get(sid, 0.0)
         if qty <= 0:
             log.warning(f"[RUNNER_CLOSE_SKIP] sid={sid} qty<=0, nothing to close")
             return
+        requested_qty = qty
         close_side = "sell" if side == "long" else "buy"
         log.info(f"[RUNNER_CLOSE_START] sid={sid} symbol={symbol} "
                  f"side={close_side} qty={qty:.6f}")
@@ -742,11 +750,21 @@ class StrategyRunner:
         except Exception as e:
             log.error(f"[RUNNER_CLOSE_EXCEPTION] sid={sid} error={e}")
             return
-        # 清理状态 + 持久化（M4: DB）
-        self._stop_managers.pop(sid, None)
-        self._positions_usdt.pop(sid, None)
-        self._positions_qty.pop(sid, None)
-        log.info(f"[RUNNER_POSITION_CLEARED] sid={sid} symbol={symbol}")
+        # 清理状态 + 持久化（v2.0: 部分成交时保留剩余仓位，不再整体丢失）
+        remaining_qty = requested_qty - qty  # qty 已被 verified 覆盖为实际成交量
+        if remaining_qty > 1e-10:
+            original_usdt = self._positions_usdt.get(sid, 0.0)
+            self._positions_qty[sid] = remaining_qty
+            self._positions_usdt[sid] = (
+                original_usdt * (remaining_qty / requested_qty) if requested_qty > 0 else 0.0
+            )
+            log.warning(f"[RUNNER_PARTIAL_CLOSE] sid={sid} symbol={symbol} "
+                        f"filled={qty:.6f} remaining={remaining_qty:.6f}")
+        else:
+            self._stop_managers.pop(sid, None)
+            self._positions_usdt.pop(sid, None)
+            self._positions_qty.pop(sid, None)
+            log.info(f"[RUNNER_POSITION_CLEARED] sid={sid} symbol={symbol}")
         await self._persist_state(sid)
 
     def is_running(self, strategy_id: str) -> bool:

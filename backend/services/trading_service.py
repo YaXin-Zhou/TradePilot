@@ -310,6 +310,41 @@ async def _get_total_capital() -> float:
         return 0.0
 
 
+async def _get_account_exchange(account_id: str):
+    """按 account_id 解析交易所实例（v2.0: 非 default 账户走 registry，失败抛错）"""
+    if account_id and account_id != "default":
+        return await exchange_registry.get("default", account_id)
+    return exmod.shared_exchange
+
+
+async def _get_daily_realized_loss(user_id: str) -> float:
+    """当日已实现亏损（v2.0: 由 Trade 表汇总，供日亏损上限检查）。
+
+    返回正数 = 当日净亏损金额；0 = 无亏损或盈利。
+    """
+    try:
+        from datetime import datetime, timezone as _tz
+        from sqlalchemy import select, func
+        from db.models import Trade
+
+        start = (
+            datetime.now(_tz.utc)
+            .replace(hour=0, minute=0, second=0, microsecond=0)
+            .replace(tzinfo=None)
+        )
+        async with async_session() as session:
+            pnl = await session.scalar(
+                select(func.coalesce(func.sum(Trade.profit), 0.0)).where(
+                    Trade.closed_at >= start
+                )
+            )
+            pnl = float(pnl or 0.0)
+            return max(0.0, -pnl)
+    except Exception as e:
+        log.warning(f"daily realized loss lookup failed: {e}")
+        return 0.0
+
+
 def _check_kill_switch(side: str = "") -> tuple[bool, str]:
     """检查紧急停止状态。
 
@@ -581,9 +616,16 @@ async def place_limit_order(user_id: str, symbol: str, side: str,
         log.info(f"[ORDER_IDEMPOTENT_REPLAY] key={idempotency_key} -> existing {existing.get('id')}")
         return existing, None, False
 
+    # v2.0: 按 account_id 路由交易所实例（非 default 账户走 registry，失败抛错）
+    try:
+        _exchange = await _get_account_exchange(account_id)
+    except Exception as e:
+        log.error(f"[ORDER_REJECTED] reason=account_routing account={account_id} error={e}")
+        return None, f"账户 {account_id} 不可用: {e}", False
+
     try:
         order = await asyncio.to_thread(
-            exmod.shared_exchange.create_limit_order, symbol, side, amount, price, client_order_id
+            _exchange.create_limit_order, symbol, side, amount, price, client_order_id
         )
         log.info(f"[ORDER_PLACED] type=LIMIT id={order.get('id')} symbol={symbol} "
                  f"side={side} amount={amount} price={order.get('price', price)} "
@@ -671,9 +713,16 @@ async def place_market_order(user_id: str, symbol: str, side: str,
         log.info(f"[ORDER_IDEMPOTENT_REPLAY] key={idempotency_key} -> existing {existing.get('id')}")
         return existing, None, False
 
+    # v2.0: 按 account_id 路由交易所实例
+    try:
+        _exchange = await _get_account_exchange(account_id)
+    except Exception as e:
+        log.error(f"[ORDER_REJECTED] reason=account_routing account={account_id} error={e}")
+        return None, f"账户 {account_id} 不可用: {e}", False
+
     try:
         order = await asyncio.to_thread(
-            exmod.shared_exchange.create_market_order, symbol, side, amount, False, client_order_id
+            _exchange.create_market_order, symbol, side, amount, False, client_order_id
         )
         log.info(f"[ORDER_PLACED] type=MARKET id={order.get('id')} symbol={symbol} "
                  f"side={side} amount={amount} price={order.get('price', 0)} "

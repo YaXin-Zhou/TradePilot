@@ -46,15 +46,20 @@ class ExchangeRegistry:
         # 2. 从 DB 加载凭据
         cred = await self._load_credential(tenant_id, account_id)
         if cred is None:
-            # Fallback: 返回 shared_exchange（单账户兼容）
-            log.debug(f"ExchangeRegistry: no credential for {key}, fallback to shared_exchange")
-            return exmod.shared_exchange
+            # 仅 "default" 账户允许 fallback（单账户向后兼容）；非 default 抛错避免跨账户污染
+            if account_id == "default":
+                log.debug(f"ExchangeRegistry: no credential for {key}, fallback to shared_exchange")
+                return exmod.shared_exchange
+            raise RuntimeError(f"账户 {account_id} 无凭据（ExchangeCredential 表无记录）")
 
         # 3. 创建新实例
         try:
             api_key = decrypt(cred.api_key_enc) if cred.api_key_enc else ""
             secret = decrypt(cred.api_secret_enc) if cred.api_secret_enc else ""
             passphrase = decrypt(cred.passphrase_enc) if cred.passphrase_enc else ""
+
+            if not api_key or not secret:
+                raise RuntimeError(f"账户 {account_id} 凭据解密失败或为空")
 
             client = ExchangeClient(
                 exchange_name=cred.exchange_id or global_settings.EXCHANGE_NAME,
@@ -69,7 +74,7 @@ class ExchangeRegistry:
             return client
         except Exception as e:
             log.error(f"ExchangeRegistry: failed to create instance for {key}: {e}")
-            return exmod.shared_exchange
+            raise
 
     async def _load_credential(
         self,

@@ -54,10 +54,10 @@
 - [x] 无回测策略不再默认 Sharpe=1.0（改从 Strategy 表取，无回测默认 0 交由门槛拦截）
 
 ### 1.5 其他资金安全
-- [ ] `_get_daily_realized_loss` 补实现（当前未定义，开启日亏损即 NameError）
-- [ ] `account_id` 真正路由到 `exchange_registry`，创建失败抛错而非静默回退主账户
-- [ ] runner 乐观锁改 `SELECT ... FOR UPDATE` 或 version CAS，防多实例重复交易
-- [ ] 平仓后以交易所持仓为真源，残留仓位写回（修复部分成交丢仓）
+- [x] `_get_daily_realized_loss` 补实现（当前未定义，开启日亏损即 NameError）
+- [x] `account_id` 真正路由到 `exchange_registry`，创建失败抛错而非静默回退主账户
+- [x] runner 乐观锁改 `SELECT ... FOR UPDATE`（PG 行级锁），防多实例重复交易
+- [x] 平仓后保留剩余仓位（部分成交不再整体丢失）
 
 ### 1.6 权限模型
 - [ ] 关闭开放注册（改邀请/首个管理员引导）
