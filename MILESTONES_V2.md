@@ -119,7 +119,8 @@
 - [x] 补 10 个 i18n 缺失 key（trade.symbol/trading.orderbook/strat.*/analysis.*）
 - [x] 持仓页 `positions.tsx`/`types/portfolio.ts` 适配合约字段（v2.0 已完成）
 - [x] 挂回 `/backtest` 导航（清理重复 AI 页待做）
-- [ ] 重写 Vitest/Playwright 为真实组件断言（当前全是内联假组件 + 过期 spec）
+- [x] 重写 Vitest/Playwright 为真实组件断言（Layout/ErrorBoundary/Skeleton + ai-factory spec）
+- [x] 修复 `tsc --noEmit` 4 处类型错误（Skeleton style、api 重复 getRiskPolicies、i18n 重复 dash.totalTrades）
 
 ### 3.4 可观测性
 - [x] Alertmanager receiver：**本地部署用 log-output 即可**（无外部 webhook，日志落本地文件）；生产部署时再配企业微信/邮件/Slack
