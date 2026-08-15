@@ -33,12 +33,12 @@
 ### C. 合约交易（当前联调）
 - [x] OKX 账户从「简易模式」切到「跨币种保证金 + 双向持仓」（用户操作，错误码 51010 已解决）
 - [x] 切换后验证合约下单 → 持仓 → 平仓全链路（下单/持仓/平仓均验证通过）
-- [ ] 清理之前误下到现货的 0.01 BTC（测试盘，可选 —— 可在 OKX 后台手动卖出，不影响合约）
+- [x] 清理之前误下到现货的 0.01 BTC（用户确认：不用管，测试盘可忽略）
 
 ### D. 工程化 / 部署（P2）
-- [ ] HTTPS 真正生效（nginx 443 + Let's Encrypt，需域名 —— 本地部署不适用，部署时再做）
-- [ ] Alertmanager 接真实 receiver（需 webhook 凭据 —— 本地用 log-output 即可）
-- [ ] Redis requirepass + Grafana 强密码（需协调 .env —— 本地单机未启用 Redis/Grafana）
+- [x] HTTPS（用户确认：本地部署不需要，上服务器时再做）
+- [x] Alertmanager（用户确认：本地用 log-output 即可，暂不需要真实 receiver）
+- [x] Redis requirepass + Grafana（用户确认：本地单机未启用 Redis/Grafana，暂不需要）
 - [x] 前端测试重写为真实组件断言（commit 094fcaf 已完成，tsc 4 处类型错误已修复）
 
 ---
