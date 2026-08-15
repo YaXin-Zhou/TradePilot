@@ -159,6 +159,19 @@ class AIHeartbeat:
         self._append_history(result)
         self._last_cycle = result
 
+        # v5: 将心跳审查结果写入各策略日志（此前 heartbeat 事件类型从未真正写入）
+        try:
+            from services.strategy_log import append as log_event
+            name_to_id = {s.name: s.strategy_id for s in snapshots}
+            for r in recommendations:
+                sid = name_to_id.get(r.get("strategy_name", ""))
+                if sid:
+                    log_event(sid, "heartbeat",
+                              f"{r.get('action', 'review')}: {r.get('reason', '')}",
+                              r)
+        except Exception as e:
+            log.warning(f"Heartbeat log_event failed: {e}")
+
         log.info(f"AI Heartbeat: cycle #{self._cycle_count} complete, "
                  f"{len(recommendations)} recommendations pending review")
         return result

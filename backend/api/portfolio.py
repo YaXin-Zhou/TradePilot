@@ -1,5 +1,6 @@
 """投资组合 API — 薄层：参数校验 → 调用 service → 构造响应"""
 import asyncio
+from datetime import datetime, timezone
 from fastapi import APIRouter, Query, Depends
 from pydantic import BaseModel
 
@@ -11,8 +12,55 @@ from services.portfolio_allocator import portfolio_allocator
 import core.exchange as exmod
 from core.logger import log
 from auth.deps import get_current_user
+from db.database import async_session
+from db.models import Trade
 
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
+
+
+def _utcnow_naive() -> datetime:
+    """统一返回 naive UTC datetime（与 DB TIMESTAMP WITHOUT TIME ZONE 兼容）"""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+async def _record_manual_close(symbol: str, side: str, contracts: float,
+                               entry_price: float, exit_price: float, order: dict):
+    """手动平仓后写入 Trade 表（V5 问题2：此前手动平仓不落库，仪表盘「最近成交」恒为空）。
+
+    strategy_id 置 None 表示非策略手动交易；数量单位是「张数」，盈亏需乘 contractSize。
+    """
+    try:
+        if contracts <= 0:
+            return
+        cs = exmod.shared_exchange.get_contract_size(symbol)
+        if side == "long":
+            profit = (exit_price - entry_price) * contracts * cs
+            buy_price, sell_price = entry_price, exit_price
+        else:
+            profit = (entry_price - exit_price) * contracts * cs
+            buy_price, sell_price = exit_price, entry_price
+        cost = entry_price * contracts * cs
+        profit_pct = (profit / cost * 100) if cost > 0 else 0.0
+
+        async with async_session() as session:
+            session.add(Trade(
+                strategy_id=None,
+                symbol=symbol,
+                buy_price=round(buy_price, 6),
+                sell_price=round(sell_price, 6),
+                quantity=contracts,
+                profit=round(profit, 4),
+                profit_pct=round(profit_pct, 4),
+                sell_order_id=str(order.get("id") or "") if order else "",
+                opened_at=_utcnow_naive(),
+                closed_at=_utcnow_naive(),
+            ))
+            await session.commit()
+        log.info(f"[MANUAL_TRADE_RECORDED] symbol={symbol} side={side} "
+                 f"contracts={contracts} entry={entry_price:.6f} exit={exit_price:.6f} "
+                 f"profit={profit:.4f}")
+    except Exception as e:
+        log.warning(f"record manual close failed (non-fatal): {e}")
 
 
 @router.get("/summary")
@@ -81,6 +129,8 @@ async def close_position(req: ClosePositionRequest, _user: dict = Depends(get_cu
     symbol = target.get("symbol") or f"{asset}/USDT"
     side = target.get("side", "")
     contracts = float(target.get("contracts", 0) or 0)
+    entry_price = float(target.get("entry_price", 0) or 0)
+    mark_price = float(target.get("mark_price", 0) or 0)
     if contracts <= 0:
         return {"success": False, "error": f"无 {asset} 合约持仓"}
 
@@ -93,6 +143,19 @@ async def close_position(req: ClosePositionRequest, _user: dict = Depends(get_cu
     except Exception as e:
         log.error(f"ClosePosition: close failed for {symbol}: {e}")
         return {"success": False, "error": f"平仓失败: {e}"}
+
+    # 成交均价：优先 order.price → 次选 cost/filled → 兜底 mark_price
+    exit_price = float((order or {}).get("price") or 0)
+    if exit_price <= 0 and order:
+        filled = float(order.get("filled") or 0)
+        cost = float(order.get("cost") or 0)
+        if filled > 0 and cost > 0:
+            exit_price = cost / filled
+    if exit_price <= 0:
+        exit_price = mark_price
+
+    # V5 问题2：平仓落库 Trade，让仪表盘「最近成交」/绩效曲线反映真实成交
+    await _record_manual_close(symbol, side, contracts, entry_price, exit_price, order)
 
     log.info(f"ClosePosition: {symbol} ({side}) x{contracts} contracts closed reduce-only, "
              f"order={order.get('id') if order else 'N/A'}")

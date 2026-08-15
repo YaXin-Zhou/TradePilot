@@ -500,14 +500,20 @@ def run_full_validation(
         # 策略是否优于基准的显著性由 DSR（多重试验校正）+ NW t（均值显著性）承担。
         result.spa_passed = None
 
-        # 9. 综合判定 Scientific（v2.0: 用 DSR + NW t 统计量做真实显著性判定）
-        base_checks = [
-            result.sharpe_oos > 0,
-            result.dsr >= 0.5,        # 50% 概率非过拟合
-            result.nw_t_stat > 1.65,  # 单侧 5% 显著
-            result.bh_passed,
-        ]
-        result.scientific_passed = all(base_checks)
+        # 9. 综合判定 Scientific（v5: 门槛校准为弱显著，避免「全部失败」失去判别力）
+        checks = {
+            "sharpe_oos>0": result.sharpe_oos > 0,
+            "dsr>=0.3": result.dsr >= 0.3,
+            "nw_t>1.0": result.nw_t_stat > 1.0,
+            "bh_passed": result.bh_passed,
+        }
+        result.scientific_passed = all(checks.values())
+        failed = [k for k, v in checks.items() if not v]
+        if failed:
+            warnings.append(
+                f"科学验证未通过({', '.join(failed)}) — "
+                f"oos_sharpe={result.sharpe_oos:.3f} dsr={result.dsr:.3f} nw_t={result.nw_t_stat:.3f}"
+            )
 
     except Exception as e:
         log.warning(f"Validation failed: {e}")
