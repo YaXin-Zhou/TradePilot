@@ -248,7 +248,8 @@ def compute_newey_west(equity_curve: list[dict]) -> dict:
         nw_variance += 2 * weight * autocov
 
     nw_variance = nw_variance / T
-    nw_se = np.sqrt(max(nw_variance, 1e-10))
+    # v2.0: 标准误 = sqrt(长期方差 / T)，补回 1/√T 因子（此前 t 统计量被高估 √T 倍）
+    nw_se = np.sqrt(max(nw_variance / T, 1e-10))
     t_stat = mean_ret / nw_se if nw_se > 0 else 0.0
 
     return {

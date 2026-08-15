@@ -70,11 +70,12 @@
 > 目标：修好 PBO/SPA/DSR/NW，消除前视偏差，让 AI 产物可交易。
 
 ### 2.1 统计检验校正
-- [ ] PBO 改为 CSCV（Combinatorially Symmetric Cross-Validation），或换 `quantstats`/`vectorbt`
-- [ ] SPA 改为正确的 stationary bootstrap + studentized max 统计量
-- [ ] DSR 采用 Bailey & López de Prado 真实公式（含偏度/峰度/试验次数）
-- [ ] Newey-West 标准误补 `1/√T` 因子
-- [ ] `scientific_passed` 纳入 DSR、NW t、真实 BH p 值，而非退化成「OOS 夏普>0」
+- [ ] PBO 改为 CSCV（Combinatorially Symmetric Cross-Validation），或换 `quantstats`/`vectorbt`（当前实现退化，建议换成熟库）
+- [ ] SPA 改为正确的 stationary bootstrap + studentized max 统计量（当前恒 p≈0，建议换成熟库）
+- [ ] DSR 采用 Bailey & López de Prado 真实公式（含偏度/峰度/试验次数，当前是伪公式）
+- [x] Newey-West 标准误补 `1/√T` 因子
+- [ ] `scientific_passed` 纳入 DSR、NW t、真实 BH p 值（PBO/SPA 修复后一并整改）
+- [x] Sharpe 年化因子修正：1h K 线 `sqrt(24*365)`（此前误用 365 低估 4.9 倍）
 
 ### 2.2 消除前视偏差
 - [x] 回测信号用前一根 K 线（MA/RSI/布林带均 shift(1)），杜绝当前收盘价信号在当前收盘价成交

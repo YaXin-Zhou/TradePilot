@@ -203,7 +203,8 @@ class BacktestEngine:
             eq_series = pd.Series(eq_vals)
             rets = eq_series.pct_change().dropna()
             if len(rets) > 0:
-                sharpe = round(float(rets.mean() / rets.std() * np.sqrt(365)), 2) if rets.std() > 0 else 0
+                # v2.0: 1h K 线年化因子 = sqrt(24*365)（此前误用 365 致 Sharpe 低估约 4.9 倍）
+                sharpe = round(float(rets.mean() / rets.std() * np.sqrt(24 * 365)), 2) if rets.std() > 0 else 0
             peak = eq_series.expanding().max()
             dd = eq_series - peak
             dd_pct = dd / peak * 100
