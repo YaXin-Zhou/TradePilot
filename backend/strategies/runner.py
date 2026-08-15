@@ -734,8 +734,9 @@ class StrategyRunner:
         log.info(f"[RUNNER_CLOSE_START] sid={sid} symbol={symbol} "
                  f"side={close_side} qty={qty:.6f}")
         try:
+            # v2.1: 平仓走 reduce_only（双向持仓模式，posSide 由方向自动推导）
             order = await asyncio.to_thread(
-                exmod.shared_exchange.create_market_order, symbol, close_side, qty
+                exmod.shared_exchange.create_market_order, symbol, close_side, qty, True
             )
             log.info(f"[RUNNER_CLOSE_DONE] sid={sid} id={order.get('id')} "
                      f"side={close_side} qty={qty:.6f}")

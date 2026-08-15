@@ -175,6 +175,16 @@ class ExchangeClient:
             pass
         return symbol
 
+    @staticmethod
+    def _derive_pos_side(side: str, reduce_only: bool) -> str:
+        """双向持仓模式下推导 posSide。
+
+        开仓：buy→long、sell→short；平仓（reduceOnly）：sell 平多(long)、buy 平空(short)。
+        """
+        if reduce_only:
+            return "long" if side == "sell" else "short"
+        return "long" if side == "buy" else "short"
+
     def fetch_ticker(self, symbol: str) -> dict:
         self._try_reconnect()
         if not self._connected:
@@ -326,14 +336,21 @@ class ExchangeClient:
         return float(self._exchange.amount_to_precision(self._to_swap_symbol(symbol), amount))
 
     def create_limit_order(self, symbol: str, side: str, amount: float, price: float,
-                           client_order_id: Optional[str] = None) -> Optional[dict]:
+                           client_order_id: Optional[str] = None,
+                           reduce_only: bool = False,
+                           pos_side: Optional[str] = None) -> Optional[dict]:
         self._ensure_markets()
         price = self._to_price(symbol, price)
         amount = self._to_amount(symbol, amount)
         try:
             params: dict = {}
+            if reduce_only:
+                params["reduceOnly"] = True
             if client_order_id:
                 params["clientOrderId"] = client_order_id
+            if pos_side is None:
+                pos_side = self._derive_pos_side(side, reduce_only)
+            params["posSide"] = pos_side
             order = self._exchange.create_limit_order(
                 self._to_swap_symbol(symbol), side, amount, price, params or None
             )
@@ -355,8 +372,9 @@ class ExchangeClient:
 
     def create_market_order(self, symbol: str, side: str, amount: float,
                             reduce_only: bool = False,
-                            client_order_id: Optional[str] = None) -> Optional[dict]:
-        """下市价单。v2.0: 支持 reduce_only（合约平仓）+ clientOrderId（幂等/对账）。"""
+                            client_order_id: Optional[str] = None,
+                            pos_side: Optional[str] = None) -> Optional[dict]:
+        """下市价单。v2.1: 支持 reduce_only + clientOrderId + posSide（双向持仓模式）。"""
         self._ensure_markets()
         try:
             params: dict = {}
@@ -364,6 +382,9 @@ class ExchangeClient:
                 params["reduceOnly"] = True
             if client_order_id:
                 params["clientOrderId"] = client_order_id
+            if pos_side is None:
+                pos_side = self._derive_pos_side(side, reduce_only)
+            params["posSide"] = pos_side
             order = self._exchange.create_market_order(
                 self._to_swap_symbol(symbol), side, amount, None, params or None
             )
