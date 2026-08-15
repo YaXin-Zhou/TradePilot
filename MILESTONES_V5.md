@@ -13,6 +13,7 @@
 ### 2. 仪表盘「最近成交」是假数据
 - [x] `/api/portfolio/trades` 数据源确认无 mock 回退（`get_trade_history` 空表返回空列表）。
 - [x] 手动平仓现写入 `Trade` 表：`api/portfolio.py` 平仓后调用 `_record_manual_close`（按 contractSize 计算真实盈亏），使「最近成交」反映真实成交而非空。
+- [x] 根因定位：集成测试（`test_integration_runner` 的止损/平仓用例）未隔离数据库，把 `strategy_id='strat1'` 的假成交写进了开发库 `data/trading.db`。已清理 14 条假成交 + 1 条 runner_state，并新增 `tests/conftest.py` 将测试强制切到独立临时库，杜绝复发。
 
 ### 3. 策略加入策略库后胜率 1000%
 - [x] 前端 `StrategyComparison.tsx`/`strategies.tsx` 移除二次 `* 100`（后端已返回百分数值），修复 double-percent。
@@ -31,6 +32,7 @@
 - [x] `services/market_service.py`：移除 `_mock_ticker/_mock_ohlcv/_mock_orderbook` 随机假数据，交易所失败返回空数据 + `is_mock=True`。
 - [x] `api/realtime.py`：移除 `SimulatedPriceEngine`，断线重连期间不再向客户端推送伪造随机价格（客户端保留最后一条真实行情）。
 - [x] `services/backtest_service.py`：删除 `_mock_ohlcv` 与 `import random`。
+- [x] 测试库隔离：新增 `tests/conftest.py` 设置 `DATABASE_URL` 指向独立临时库并建表，集成测试不再污染开发库。
 - [x] 确认其余 `random` 用途均为合法（`ai_iterator` 随机搜索变体、`validation`/`ml` 统计随机种子），非展示给用户的假数据。
 - [x] 已知遗留（需外部数据源，非假数据）：`feature_engine` 的 `large_trade_ratio / btc_dominance / stablecoin_flow / exchange_inflow / oi_*` 等特征暂以中性值 0 占位，注释已标明「暂不可从 OHLCV 推得」。
 
