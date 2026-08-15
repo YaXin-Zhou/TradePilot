@@ -9,8 +9,7 @@ pydantic==2.13.4
 python-dotenv==1.2.2
 cryptography==49.0.0
 websockets==16.1
-pandas>=1.5.0,<2.0
-pandas-ta==0.4.71b0
+pandas>=2.0
 slowapi==0.1.9
 python-jose==3.5.0
 bcrypt>=4.0.1
