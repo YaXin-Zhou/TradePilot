@@ -284,6 +284,23 @@ class ExchangeClient:
         self._ensure_markets()
         return float(self._exchange.price_to_precision(symbol, price))
 
+    def get_contract_size(self, symbol: str) -> float:
+        """获取合约 contractSize（现货市场返回 1.0）。
+
+        v2.1: 合约模式下 amount 单位是「张数」，名义价值 = 张数 × contractSize × 价格。
+        注意：market('BTC/USDT') 可能返回现货，需在 markets 里找 swap 市场。
+        """
+        self._ensure_markets()
+        try:
+            base, _, quote = symbol.partition("/")
+            for m in self._exchange.markets.values():
+                if m.get("base") == base and m.get("quote") == quote and m.get("swap"):
+                    return float(m.get("contractSize") or 1.0)
+            m = self._exchange.market(symbol)
+            return float(m.get("contractSize") or 1.0)
+        except Exception:
+            return 1.0
+
     def _to_amount(self, symbol: str, amount: float) -> float:
         self._ensure_markets()
         return float(self._exchange.amount_to_precision(symbol, amount))

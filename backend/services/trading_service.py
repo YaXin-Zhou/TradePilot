@@ -624,7 +624,9 @@ async def place_limit_order(user_id: str, symbol: str, side: str,
         log.warning(f"[ORDER_REJECTED] reason=live_confirm_required symbol={symbol}")
         return None, "实盘模式下单需二次确认（confirm_live=true）", False
 
-    amount_usdt = amount * price
+    # v2.1: 合约模式下 amount 单位是「张数」，名义价值 = 张数 × contractSize × 价格
+    contract_size = exmod.shared_exchange.get_contract_size(symbol)
+    amount_usdt = amount * contract_size * price
     ok, msg = await _enhanced_risk_check(user_id, symbol, side, amount_usdt, source="manual")
     if not ok:
         log.warning(f"[ORDER_REJECTED] reason=risk_check symbol={symbol} side={side} msg={msg}")
@@ -721,7 +723,9 @@ async def place_market_order(user_id: str, symbol: str, side: str,
         log.warning(f"[ORDER_REJECTED] reason=no_price symbol={symbol}")
         return None, "无法获取当前价格，拒绝下单", False
 
-    amount_usdt = amount * est_price
+    # v2.1: 合约模式下 amount 单位是「张数」，名义价值 = 张数 × contractSize × 价格
+    contract_size = exmod.shared_exchange.get_contract_size(symbol)
+    amount_usdt = amount * contract_size * est_price
     ok, msg = await _enhanced_risk_check(user_id, symbol, side, amount_usdt, source=source)
     if not ok:
         log.warning(f"[ORDER_REJECTED] reason=risk_check symbol={symbol} side={side} msg={msg}")
