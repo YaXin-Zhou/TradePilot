@@ -136,6 +136,66 @@ async def flush_strategy_logs():
         log.debug(f"StrategyLog flush failed: {e}")
 
 
+async def update_online_learning():
+    """每天更新策略表现 + 在线学习权重（v2.0: 接入生产循环，数据源为 Trade 表）。
+
+    Trade 表由 runner 平仓时写入；本任务据此计算各策略日收益，
+    更新策略池表现（自动休眠/淘汰），并用在线学习器重分配权重。
+    """
+    try:
+        from datetime import datetime, timezone as _tz
+        from sqlalchemy import select, func
+        from db.database import async_session
+        from db.models import Trade
+        from services.strategy_pool import strategy_pool
+        from services.online_learner import online_learner
+        from core.exchange import shared_exchange
+
+        start = (
+            datetime.now(_tz.utc)
+            .replace(hour=0, minute=0, second=0, microsecond=0)
+            .replace(tzinfo=None)
+        )
+
+        # 1) 今日各策略已实现盈亏
+        async with async_session() as session:
+            rows = (await session.execute(
+                select(Trade.strategy_id, func.coalesce(func.sum(Trade.profit), 0.0))
+                .where(Trade.closed_at >= start)
+                .group_by(Trade.strategy_id)
+            )).all()
+        today_pnl = {sid: float(pnl) for sid, pnl in rows if sid}
+
+        # 2) 总资金（失败则保守用 0，跳过权重更新）
+        try:
+            bal = await asyncio.to_thread(shared_exchange.fetch_balance)
+            total_capital = float(bal.get("USDT", {}).get("total", 0.0) or 0.0)
+        except Exception:
+            total_capital = 0.0
+
+        all_sids = [s.id for s in strategy_pool.list_all()]
+        if not all_sids:
+            return
+
+        # 3) 更新策略表现（日收益 = 今日盈亏 / 总资金）
+        for sid in all_sids:
+            pnl = today_pnl.get(sid, 0.0)
+            daily_return = (pnl / total_capital) if total_capital > 0 else 0.0
+            strategy_pool.update_performance(sid, daily_return, total_capital, total_capital)
+
+        # 4) 在线学习器重分配权重
+        if total_capital > 0:
+            returns = {sid: today_pnl.get(sid, 0.0) / total_capital for sid in all_sids}
+            sleeping = [s.id for s in strategy_pool.list_all() if s.status.value == "sleeping"]
+            result = online_learner.update(returns, sleeping=sleeping)
+            # 5) 学习权重回写策略池（供 portfolio_allocator/runner 使用）
+            for sid, w in result.weights.items():
+                strategy_pool.set_weight(sid, w)
+            log.info(f"Online learning: updated {len(result.weights)} weights, eta={result.learning_rate}")
+    except Exception as e:
+        log.warning(f"Online learning update failed: {e}")
+
+
 async def system_heartbeat():
     """系统心跳日志 — 每 60 秒输出系统整体运行状态。
 
@@ -200,11 +260,14 @@ def start_scheduler():
     scheduler.add_job(system_heartbeat, IntervalTrigger(seconds=60), id="system_heartbeat", replace_existing=True)
     # 策略日志刷盘（每 10 秒将内存队列写入 DB）
     scheduler.add_job(flush_strategy_logs, IntervalTrigger(seconds=10), id="flush_strategy_logs", replace_existing=True)
+    # v2.0: 在线学习（每天更新策略表现 + 权重，数据源 Trade 表）
+    scheduler.add_job(update_online_learning, IntervalTrigger(hours=24), id="update_online_learning", replace_existing=True)
     # Phase 8: 任务执行监听（异常隔离 + 记录）
     scheduler.add_listener(_job_listener, EVENT_JOB_ERROR | EVENT_JOB_EXECUTED)
     scheduler.start()
     log.info("Scheduler started (market data: 1h, ML retrain: 24h, AI heartbeat: 6h, "
-             "kill_switch refresh: 5s, pending orders flush: 30s, system heartbeat: 60s, strategy log flush: 10s)")
+             "kill_switch refresh: 5s, pending orders flush: 30s, system heartbeat: 60s, "
+             "strategy log flush: 10s, online learning: 24h)")
 
 
 def stop_scheduler():
