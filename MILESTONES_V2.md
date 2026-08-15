@@ -110,7 +110,8 @@
 - [x] `scheduler.py` 的 `OR IGNORE` → `ON CONFLICT DO NOTHING`（PostgreSQL，SQLite 保留 OR IGNORE）
 - [x] 锁定 `pandas<2.0`（兼容 pandas-ta 0.4.71b0）
 - [ ] HTTPS 真正生效：挂载 `nginx.ssl.conf` 或用 envsubst 模板注入 DOMAIN
-- [x] 端口默认不发布宿主（DB/Redis/监控 bind 127.0.0.1）；弱凭据改必填占位 + Redis `requirepass` 待做
+- [x] 端口默认不发布宿主（DB/Redis/监控 bind 127.0.0.1）
+- [x] 弱 DB 密码生产拒绝启动（config.validate_security 检测 root/password 等弱口令）；Redis `requirepass` + Grafana 强密码待做
 
 ### 3.3 前端契约
 - [x] 补 `/api/analysis/train` 路由（后端补上，前端按钮恢复可用）

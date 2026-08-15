@@ -162,6 +162,21 @@ class Settings:
                 "生产环境请使用 PostgreSQL"
             )
 
+        # v2.0: 检测弱 DB 密码（生产模式拒绝启动，配合 docker-compose 的 root:root 默认值）
+        if not self.DEBUG and "postgresql" in self.DATABASE_URL.lower():
+            try:
+                from urllib.parse import urlparse
+                db_pwd = (urlparse(self.DATABASE_URL).password or "").lower()
+                if db_pwd in ("", "root", "password", "postgres", "123456", "changeme"):
+                    raise RuntimeError(
+                        "FATAL: DATABASE_URL 使用弱 DB 密码（root/password/空等）。"
+                        "生产环境必须设置强随机 DB 密码（参考 .env.example 的 DB_PASSWORD）"
+                    )
+            except RuntimeError:
+                raise
+            except Exception:
+                pass
+
         # N3: 检测 <CHANGE_ME> 占位符（防 .env.example 复制后漏改）
         placeholders: list[str] = []
         if self.EXCHANGE_API_KEY == "<CHANGE_ME>":
