@@ -118,6 +118,8 @@ const zh: Record<string, string> = {
   "trade.filled": "已成交",
   "trade.status": "状态",
   "trade.noOrders": "暂无挂单",
+  "trade.symbol": "交易对",
+  "trading.orderbook": "订单簿",
 
   "strat.title": "策略管理",
   "strat.subtitle": "创建和管理交易策略",
@@ -141,6 +143,9 @@ const zh: Record<string, string> = {
   "strat.winRate": "胜率",
   "strat.start": "启动",
   "strat.stop": "停止",
+  "strat.compare": "策略对比",
+  "strat.strategies": "策略列表",
+  "strat.bestPerf": "最优表现",
 
   "analysis.title": "AI 分析",
   "analysis.subtitle": "机器学习预测与技术指标分析",
@@ -158,6 +163,11 @@ const zh: Record<string, string> = {
   "analysis.up": "上涨",
   "analysis.down": "下跌",
   "analysis.neutral": "中性",
+  "analysis.loading": "加载中...",
+  "analysis.upProb": "上涨概率",
+  "analysis.downProb": "下跌概率",
+  "analysis.confidence": "置信度",
+  "analysis.trainHint": "训练模型后可查看预测结果",
 
   "wallet.title": "钱包",
   "wallet.subtitle": "账户余额与资产",
@@ -435,6 +445,8 @@ const en: Record<string, string> = {
   "trade.filled": "Filled",
   "trade.status": "Status",
   "trade.noOrders": "No open orders",
+  "trade.symbol": "Symbol",
+  "trading.orderbook": "Order Book",
 
   "strat.title": "Strategies",
   "strat.subtitle": "Create and manage trading strategies",
@@ -458,6 +470,9 @@ const en: Record<string, string> = {
   "strat.winRate": "Win Rate",
   "strat.start": "Start",
   "strat.stop": "Stop",
+  "strat.compare": "Compare",
+  "strat.strategies": "Strategies",
+  "strat.bestPerf": "Best Performer",
 
   "analysis.title": "AI Analysis",
   "analysis.subtitle": "ML predictions & technical analysis",
@@ -475,6 +490,11 @@ const en: Record<string, string> = {
   "analysis.up": "UP",
   "analysis.down": "DOWN",
   "analysis.neutral": "NEUTRAL",
+  "analysis.loading": "Loading...",
+  "analysis.upProb": "Up Probability",
+  "analysis.downProb": "Down Probability",
+  "analysis.confidence": "Confidence",
+  "analysis.trainHint": "Train the model to see predictions",
 
   "wallet.title": "Wallet",
   "wallet.subtitle": "Account balance and assets",
