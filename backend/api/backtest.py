@@ -21,8 +21,8 @@ async def api_run_backtest(body: dict):
     limit = body.get("limit", 500)
     capital = float(body.get("capital", 10000))
     position_size = float(body.get("position_size", 0.95))
-    trading_fee = float(body.get("trading_fee", 0.001))
-    slippage = float(body.get("slippage", 0.001))
+    trading_fee = float(body.get("trading_fee", 0.0005))   # v2.1: OKX 永续 taker 0.05%
+    slippage = float(body.get("slippage", 0.0005))
     params = body.get("params", {})
 
     # 获取数据
@@ -128,8 +128,8 @@ async def _run_backtest_bg(task_id: str, body: dict):
             float(body.get("capital", 10000)),
             body.get("params", {}),
             position_size_pct=float(body.get("position_size", 0.95)),
-            trading_fee_pct=float(body.get("trading_fee", 0.001)),
-            slippage_pct=float(body.get("slippage", 0.001)),
+            trading_fee_pct=float(body.get("trading_fee", 0.0005)),
+            slippage_pct=float(body.get("slippage", 0.0005)),
             with_validation=True,
         )
 

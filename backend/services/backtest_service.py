@@ -110,7 +110,7 @@ def reset_attempts():
 def _make_strategy_runner(strategy_type: str):
     """创建策略运行器闭包（供 validation 模块使用）"""
     def runner(df: pd.DataFrame, **params) -> any:
-        engine = BacktestEngine(df, 10000, position_size_pct=0.95, trading_fee_pct=0.001, slippage_pct=0.001)
+        engine = BacktestEngine(df, 10000, position_size_pct=0.95, trading_fee_pct=0.0005, slippage_pct=0.0005)
         if strategy_type == "ma_crossover":
             return engine.run_ma_crossover(params.get("fast_period", 10), params.get("slow_period", 30))
         elif strategy_type == "rsi":
@@ -130,8 +130,8 @@ def run_backtest(
     capital: float,
     params: dict,
     position_size_pct: float = 0.95,
-    trading_fee_pct: float = 0.001,
-    slippage_pct: float = 0.001,
+    trading_fee_pct: float = 0.0005,   # v2.1: OKX 永续 taker 0.05%
+    slippage_pct: float = 0.0005,
     with_validation: bool = True,
 ) -> dict:
     """执行回测 + 可选统计验证。返回结果字典"""

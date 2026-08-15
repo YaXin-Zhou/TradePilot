@@ -50,8 +50,9 @@ class BacktestResult:
 class BacktestEngine:
     def __init__(self, data: pd.DataFrame, initial_capital: float = 10000.0,
                  position_size_pct: float = 0.95,
-                 trading_fee_pct: float = 0.001,
-                 slippage_pct: float = 0.001):
+                 trading_fee_pct: float = 0.0005,   # v2.1: OKX 永续 taker 0.05%
+                 slippage_pct: float = 0.0005,
+                 funding_rate_per_hour: float = 0.0000125):  # ≈0.01%/8h 资金费率
         self.data = data.copy().reset_index(drop=True)
         self.initial_capital = initial_capital
         self.capital = initial_capital
@@ -59,12 +60,18 @@ class BacktestEngine:
         self.position_size_pct = position_size_pct
         self.trading_fee_pct = trading_fee_pct
         self.slippage_pct = slippage_pct
+        self.funding_rate_per_hour = funding_rate_per_hour
         self.trades: list[BacktestTrade] = []
         self.equity_curve: list[dict] = []
         self.total_fees: float = 0.0
         self._current_trade: Optional[BacktestTrade] = None
 
     def _record_equity(self, timestamp, price):
+        # v2.1: 持仓期间每根 K 线收取资金费（永续合约）
+        if self.position > 0 and self.funding_rate_per_hour > 0:
+            funding = self.position * price * self.funding_rate_per_hour
+            self.capital -= funding
+            self.total_fees += funding
         eq_val = self.capital + (self.position * price)
         ts_str = timestamp.isoformat() if hasattr(timestamp, "isoformat") else str(timestamp)
         self.equity_curve.append({
