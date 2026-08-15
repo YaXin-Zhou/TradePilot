@@ -108,7 +108,7 @@
 ### 3.2 部署与跨平台
 - [x] `database.py` 的 `import fcntl` 加 Windows 兜底（无 fcntl 时跳过文件锁）
 - [x] `scheduler.py` 的 `OR IGNORE` → `ON CONFLICT DO NOTHING`（PostgreSQL，SQLite 保留 OR IGNORE）
-- [x] 锁定 `pandas<2.0`（兼容 pandas-ta 0.4.71b0）
+- [x] 移除 `pandas-ta` 依赖，自实现技术指标，用 `pandas>=2.0`（兼容 Python 3.13，消除安装失败）
 - [ ] HTTPS 真正生效：挂载 `nginx.ssl.conf` 或用 envsubst 模板注入 DOMAIN
 - [x] 端口默认不发布宿主（DB/Redis/监控 bind 127.0.0.1）
 - [x] 弱 DB 密码生产拒绝启动（config.validate_security 检测 root/password 等弱口令）；Redis `requirepass` + Grafana 强密码待做
