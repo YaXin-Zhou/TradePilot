@@ -53,6 +53,10 @@ class Settings:
     # 加密密钥 (Fernet AES)
     ENCRYPTION_KEY: str = os.getenv("ENCRYPTION_KEY", "")
 
+    # v2.1: 鉴权开关 — true=本地免登录（默认管理员），false=JWT + RBAC 强鉴权
+    # 上实盘/公网必须设为 false
+    AUTH_DISABLED: bool = os.getenv("AUTH_DISABLED", "true").lower() == "true"
+
     # Telegram (optional, empty = disabled)
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_CHAT_ID: str = ""
