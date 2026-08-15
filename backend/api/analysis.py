@@ -422,3 +422,20 @@ def get_prediction(
         }
     except Exception as e:
         return {"success": False, "error": str(e), "data": None}
+
+
+@router.post("/train")
+async def train_model_endpoint(
+    symbol: str = Query("BTC/USDT"),
+    timeframe: str = Query("1h"),
+    limit: int = Query(1000),
+    _user: dict = Depends(get_current_user),
+):
+    """训练 ML 模型（v2.0: 补上此前前端调用但后端缺失的 /train 路由）"""
+    import asyncio
+    from ml.models import train_model
+    try:
+        result = await asyncio.to_thread(train_model, symbol, timeframe, limit)
+        return {"success": True, "data": result}
+    except Exception as e:
+        return {"success": False, "error": str(e), "data": None}

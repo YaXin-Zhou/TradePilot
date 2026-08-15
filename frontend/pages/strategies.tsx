@@ -72,7 +72,7 @@ export default function StrategiesPage() {
         return 0;
       });
       setStrategies(sorted);
-      if (pool?.success) setPoolSummary(pool.data);
+      setPoolSummary(pool);  // v2.0: request() 已解包 json.data，无需再判 success/data
     } catch {}
   }, []);
 

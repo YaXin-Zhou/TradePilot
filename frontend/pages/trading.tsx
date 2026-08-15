@@ -38,8 +38,8 @@ export default function TradingPage() {
     api.getTicker().then(setTicker).catch(() => {});
     api.getBalance().then(setBalance).catch(() => {});
     api.getOpenOrders().then(setOrders).catch(() => {});
-    api.getManualRiskSettings().then((r: ApiResponse<ManualRisk>) => {
-      if (r?.success && r.data) setRisk(r.data);
+    api.getManualRiskSettings().then((r: ManualRisk) => {
+      setRisk(r);  // v2.0: request() 已解包 json.data，无需再判 success/data
     }).catch(() => {});
   }, [refreshKey]);
 
@@ -57,12 +57,10 @@ export default function TradingPage() {
   const saveRisk = async () => {
     setRiskSaving(true);
     try {
-      const r: ApiResponse<ManualRisk> = await api.updateManualRiskSettings(risk as unknown as Record<string, unknown>);
-      if (r?.success && r.data) {
-        setRisk(r.data);
-        setRiskToast(isZh ? "风控设置已保存" : "Risk settings saved");
-        setTimeout(() => setRiskToast(""), 2000);
-      }
+      const r: ManualRisk = await api.updateManualRiskSettings(risk as unknown as Record<string, unknown>);
+      setRisk(r);  // v2.0: request() 已解包 json.data
+      setRiskToast(isZh ? "风控设置已保存" : "Risk settings saved");
+      setTimeout(() => setRiskToast(""), 2000);
     } catch {}
     setRiskSaving(false);
   };

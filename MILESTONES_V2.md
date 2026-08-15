@@ -112,10 +112,10 @@
 - [ ] DB/Redis 弱凭据改必填占位 + 端口默认不发布宿主；Redis 加 `requirepass`
 
 ### 3.3 前端契约
-- [ ] 补 `/api/analysis/train` 路由，或移除前端「训练模型」按钮
-- [ ] 统一 `request()` 返回约定，删除所有 `r.success && r.data` 信封判断（手动风控/策略池静默失效）
+- [x] 补 `/api/analysis/train` 路由（后端补上，前端按钮恢复可用）
+- [x] 修复 `r.success && r.data` 信封判断（trading.tsx 手动风控 + strategies.tsx 策略池）
 - [ ] 补 10 个 i18n 缺失 key
-- [ ] 持仓页 `positions.tsx`/`types/portfolio.ts` 适配合约字段（`contracts/side/entry_price/mark_price`）
+- [x] 持仓页 `positions.tsx`/`types/portfolio.ts` 适配合约字段（v2.0 已完成）
 - [ ] 挂回 `/backtest` 导航；清理 `ai-strategy`/`ai-factory`/`ai-lab` 重复页
 - [ ] 重写 Vitest/Playwright 为真实组件断言（当前全是内联假组件 + 过期 spec）
 
