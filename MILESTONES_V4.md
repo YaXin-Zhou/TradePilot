@@ -9,14 +9,14 @@
 ## 一、实盘稳定性（P0/P1，上实盘硬门槛）
 
 ### A. 阻塞性修复（本地开发就有影响）
-- [ ] **`strategy_log` 表 SQLite 兼容**：当前用 `BIGSERIAL/JSONB/TIMESTAMPTZ`（PG 专属），本地 SQLite 建表失败 → 策略事件日志不可用。改成方言自适应（SQLite 用 `INTEGER/TEXT`）
-- [ ] **Alembic Windows GBK 编码**：迁移文件中文注释在 Windows 下 `gbk` 解码失败，回退 `create_all`。修复编码或改纯 ASCII 注释
+- [x] **`strategy_log` 表 SQLite 兼容**：方言自适应（SQLite 用 `INTEGER/TEXT/DATETIME`，PG 保留 `BIGSERIAL/JSONB/TIMESTAMPTZ`）
+- [x] **Alembic Windows GBK 编码**：`.ini`/迁移脚本转纯 ASCII（去除非 ASCII 破折号与 BOM）
 
 ### B. 上实盘前必须
-- [ ] **恢复鉴权**：当前为本地特化的「免登录」（`deps.py` 返回默认管理员）。上实盘/公网前切回 JWT + RBAC（可用 `AUTH_DISABLED` 环境开关控制）
-- [ ] **CSCV PBO 接进 AI 迭代层**：`compute_cscv_pbo` 已实现但未接入。AI 迭代有多 variant 收益矩阵，应在「科学验证」阶段用 CSCV PBO 替代/补充单 config 的 DSR/NWt
-- [ ] **真实多实例验证**：行级锁/订单补偿链目前只有单测，需在 4 worker + PostgreSQL 环境做并发下单/崩溃恢复演练
-- [ ] **订单补偿链端到端演练**：模拟「下单成功但 DB 写失败」→ 验证补偿队列→scheduler 30s 补偿→超 5 分钟告警全链路
+- [x] **恢复鉴权**：`AUTH_DISABLED` 环境开关（本地 true=免登录，生产 false=JWT+RBAC）
+- [x] **CSCV PBO 接进 AI 迭代层**：`_compute_round_pbo` 用多 variant equity_curve 构建收益矩阵算 CSCV PBO
+- [ ] **真实多实例验证**：需 4 worker + PostgreSQL 环境（部署时做）
+- [ ] **订单补偿链端到端演练**：需真实交易所/DB 故障注入环境（部署时做）
 
 ### C. 生产部署（需域名/服务器/凭据）
 - [ ] Docker 编排实测（db/redis/backend×4/frontend/nginx 全链路健康）
