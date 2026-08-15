@@ -452,6 +452,40 @@ class StrategyRunner:
             log.debug(f"strategy weight lookup failed for {strategy_id}: {e}")
         return 0.1
 
+    async def _get_daily_pnl(self) -> float:
+        """当日已实现盈亏（v2.0: 由 Trade 表汇总，供日亏损熔断，不再恒 0）"""
+        try:
+            from datetime import datetime, timezone as _tz
+            from sqlalchemy import select, func
+            from db.models import Trade
+            start = (
+                datetime.now(_tz.utc)
+                .replace(hour=0, minute=0, second=0, microsecond=0)
+                .replace(tzinfo=None)
+            )
+            async with async_session() as session:
+                val = await session.scalar(
+                    select(func.coalesce(func.sum(Trade.profit), 0.0)).where(
+                        Trade.closed_at >= start
+                    )
+                )
+                return float(val or 0.0)
+        except Exception as e:
+            log.debug(f"daily pnl lookup failed: {e}")
+            return 0.0
+
+    async def _get_strategy_sharpe(self, strategy_id: str) -> float:
+        """从 Strategy 表取回测 Sharpe（v2.0: 无回测默认 0，交 risk_engine 门槛拦截）"""
+        try:
+            async with async_session() as session:
+                r = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
+                s = r.scalar_one_or_none()
+                if s and s.sharpe_ratio:
+                    return float(s.sharpe_ratio)
+        except Exception as e:
+            log.debug(f"strategy sharpe lookup failed: {e}")
+        return 0.0
+
     @staticmethod
     def _resolve_strategy_type(obj) -> str:
         """从策略对象解析 strategy_type 字符串"""
@@ -567,8 +601,26 @@ class StrategyRunner:
 
         order_amount = order_usdt / current_price
 
-        # 7. risk_engine 全链路检查
-        sharpe = getattr(obj, "sharpe_oos", 1.0)
+        # 7. risk_engine 全链路检查（v2.0: 真实 daily_pnl + 真实 Sharpe，不再恒 0/1.0）
+        sharpe = await self._get_strategy_sharpe(sid)
+        daily_pnl = await self._get_daily_pnl()
+        # 相关性数据（best-effort：策略池 return_series 为空时 risk_engine 自动跳过）
+        strategy_returns = None
+        pool_returns = None
+        try:
+            from services.strategy_pool import strategy_pool
+            sp = strategy_pool.get(sid)
+            if sp is not None and getattr(sp, "return_series", None):
+                strategy_returns = list(sp.return_series)
+            entries = getattr(strategy_pool, "_entries", {})
+            pool_returns = {
+                k: list(v.return_series)
+                for k, v in entries.items()
+                if getattr(v, "return_series", None)
+            }
+        except Exception as e:
+            log.debug(f"correlation data lookup failed: {e}")
+
         risk_result = risk_engine.full_check(
             regime=regime,
             strategy_type=strategy_type,
@@ -577,8 +629,10 @@ class StrategyRunner:
             current_position=current_position,
             new_amount=order_usdt,
             strategy_position=current_position,
-            daily_pnl=0.0,
+            daily_pnl=daily_pnl,
             user_id="system",
+            strategy_returns=strategy_returns,
+            pool_returns=pool_returns,
         )
         if not risk_result.passed:
             log.info(f"StrategyRunner[{sid}] risk blocked: {risk_result.reason}")

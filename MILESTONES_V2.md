@@ -49,9 +49,9 @@
 - [ ] 让订单补偿链（重试→补偿审计→内存队列→30s 补偿）覆盖自动交易
 
 ### 1.4 风控五维真正生效
-- [ ] runner 传入真实 `daily_pnl`（由 Trade 表汇总），日亏损熔断不再恒 0
-- [ ] runner 传入 `strategy_returns`/`pool_returns`，相关性检查不再恒跳过
-- [ ] 无回测策略不再默认 Sharpe=1.0（改为保守值或拒绝入场）
+- [x] runner 传入真实 `daily_pnl`（由 Trade 表汇总），日亏损熔断不再恒 0
+- [x] runner 传入 `strategy_returns`/`pool_returns`（best-effort 取自策略池），相关性检查不再恒跳过
+- [x] 无回测策略不再默认 Sharpe=1.0（改从 Strategy 表取，无回测默认 0 交由门槛拦截）
 
 ### 1.5 其他资金安全
 - [ ] `_get_daily_realized_loss` 补实现（当前未定义，开启日亏损即 NameError）
