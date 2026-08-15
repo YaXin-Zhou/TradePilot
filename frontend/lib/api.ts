@@ -47,15 +47,16 @@ async function request(path: string, options?: RequestInit, timeoutMs: number = 
 }
 
 // Auth token helpers
+// v2.1: 本地部署免登录 — getToken 始终返回占位 token（后端已禁用鉴权），
+// 使 SWR 的 requireAuth 门禁放行请求。
 export function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("auth_token");
+  return "local-dev-token";
 }
 export function setToken(token: string) {
-  localStorage.setItem("auth_token", token);
+  // 免登录：保留签名，不再写 localStorage
 }
 export function clearToken() {
-  localStorage.removeItem("auth_token");
+  // 免登录：保留签名，不再清除
 }
 
 export const api = {

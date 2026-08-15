@@ -1,54 +1,38 @@
-"""FastAPI dependencies for JWT authentication"""
+"""FastAPI 鉴权依赖 — v2.1 本地部署：禁用登录，所有端点免登录（默认本地管理员）
+
+说明：用户确认本地部署使用，直接去掉登录功能。
+所有 Depends(get_current_user) / Depends(require_admin) 现在都返回一个默认的本地管理员，
+不再校验 JWT。保留函数签名，避免改动所有路由。
+"""
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError
 from auth.utils import decode_token
 
-_security = HTTPBearer()
+# auto_error=False：无 token 也不返回 401
+_security = HTTPBearer(auto_error=False)
 _optional_security = HTTPBearer(auto_error=False)
 
-
-def _payload_to_user(payload: dict) -> dict:
-    return {
-        "id": payload.get("sub"),
-        "username": payload.get("name", ""),
-        "is_admin": bool(payload.get("is_admin", False)),
-    }
+# 本地部署默认用户（免登录，视作管理员）
+_LOCAL_USER = {"id": "local", "username": "local", "is_admin": True}
 
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(_security),
 ) -> dict:
-    token = credentials.credentials
-    try:
-        payload = decode_token(token)
-        user_id = payload.get("sub")
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="Invalid token")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    return _payload_to_user(payload)
+    """v2.1: 免登录，直接返回默认本地管理员（不再校验 JWT）"""
+    return dict(_LOCAL_USER)
 
 
 async def get_current_user_optional(
     credentials: HTTPAuthorizationCredentials = Depends(_optional_security),
 ) -> dict | None:
-    """可选鉴权：无 token 返回 None（用于注册引导等场景）"""
-    if credentials is None:
-        return None
-    try:
-        payload = decode_token(credentials.credentials)
-        if payload.get("sub") is None:
-            return None
-    except JWTError:
-        return None
-    return _payload_to_user(payload)
+    """v2.1: 免登录，返回默认本地管理员"""
+    return dict(_LOCAL_USER)
 
 
 async def require_admin(
     current_user: dict = Depends(get_current_user),
 ) -> dict:
-    """管理员权限校验（v2.0: 交易/密钥管理/紧急停止等敏感操作仅管理员可用）"""
-    if not current_user.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin privilege required")
+    """v2.1: 免登录，默认即管理员"""
     return current_user

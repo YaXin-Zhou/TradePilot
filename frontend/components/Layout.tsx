@@ -165,20 +165,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <Languages size={14} />
             {lang === "zh" ? "EN" : "中"}
           </button>
-          {!hydrated ? (
-            // SSR 占位：避免 hydration mismatch
-            <div className="w-full py-2" />
-          ) : getToken() ? (
-            <button onClick={() => { clearToken(); window.location.href = "/login" }}
-              className="flex items-center justify-center gap-2 w-full py-2 rounded-lg text-dark-400 hover:text-dark-200 hover:bg-dark-800 transition-all text-xs">
-              <LogOut size={14} /> {lang === "zh" ? "登出" : "Logout"}
-            </button>
-          ) : (
-            <Link href="/login"
-              className="flex items-center justify-center gap-2 w-full py-2 rounded-lg text-dark-400 hover:text-dark-200 hover:bg-dark-800 transition-all text-xs">
-              <LogIn size={14} /> {lang === "zh" ? "登录" : "Login"}
-            </Link>
-          )}
+          {/* v2.1: 本地部署免登录，移除登录/登出按钮 */}
           <button
             onClick={() => setCollapsed(!collapsed)}
             className="flex items-center justify-center w-full py-2 rounded-lg text-dark-400 hover:text-dark-200 hover:bg-dark-800 transition-all"
