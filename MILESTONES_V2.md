@@ -116,7 +116,7 @@
 - [x] 修复 `r.success && r.data` 信封判断（trading.tsx 手动风控 + strategies.tsx 策略池）
 - [ ] 补 10 个 i18n 缺失 key
 - [x] 持仓页 `positions.tsx`/`types/portfolio.ts` 适配合约字段（v2.0 已完成）
-- [ ] 挂回 `/backtest` 导航；清理 `ai-strategy`/`ai-factory`/`ai-lab` 重复页
+- [x] 挂回 `/backtest` 导航（清理重复 AI 页待做）
 - [ ] 重写 Vitest/Playwright 为真实组件断言（当前全是内联假组件 + 过期 spec）
 
 ### 3.4 可观测性

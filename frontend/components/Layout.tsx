@@ -17,6 +17,7 @@ const NAV_ITEMS = [
   { label: "nav.trading", icon: TrendingUp, href: "/trading", color: "#1e80ff" },
   { label: "nav.positions", icon: Briefcase, href: "/positions", color: "#00c076" },
   { label: "nav.strategies", icon: BarChart3, href: "/strategies", color: "#f0b90b" },
+  { label: "nav.backtest", icon: FlaskConical, href: "/backtest", color: "#ef4444" },
   { label: "nav.analysis", icon: Activity, href: "/analysis", color: "#a855f7" },
  { label: "nav.wallet", icon: Wallet, href: "/wallet", color: "#848e9c" },
   { label: "nav.aiFactory", icon: Activity, href: "/ai-factory", color: "#6366f1" },
