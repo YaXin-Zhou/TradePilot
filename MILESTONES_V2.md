@@ -121,8 +121,8 @@
 
 ### 3.4 可观测性
 - [ ] Alertmanager 配置真实 receiver（企业微信/邮件/Slack），告别空壳 `log-output`
-- [ ] `/api/metrics`、`/api/health/deep`、`/api/exchange/test-connection` 加鉴权或限内网
-- [ ] Redis 日志脱敏（当前明文打印含密码 URL）
+- [x] `/api/exchange/test-connection` 加管理员鉴权（`/api/metrics`、`/api/health/deep` 留给 Prometheus 内网抓取）
+- [x] Redis 日志脱敏（只打印 host，不泄漏含密码 URL）
 
 ---
 

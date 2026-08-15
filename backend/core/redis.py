@@ -54,7 +54,15 @@ async def get_redis():
             health_check_interval=30,
         )
         await _redis.ping()
-        log.info(f"Redis connected: {redis_url}")
+        # v2.0: 日志脱敏 — 只打印 host，避免明文泄漏含密码的 Redis URL
+        _safe_host = "unknown"
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(redis_url)
+            _safe_host = parsed.hostname or "unknown"
+        except Exception:
+            pass
+        log.info(f"Redis connected: host={_safe_host}")
         return _redis
     except Exception as e:
         log.warning(f"Redis unavailable ({e}), falling back to in-memory mode")

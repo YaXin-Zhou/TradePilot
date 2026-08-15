@@ -1,11 +1,12 @@
 """交易所连接状态 API"""
 import asyncio
 import logging
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from core.exchange import ExchangeClient, ExchangeError
 import core.exchange as exmod
 from core.redis import get_redis
 from config import settings
+from auth.deps import require_admin
 import time
 
 logger = logging.getLogger(__name__)
@@ -78,8 +79,8 @@ async def exchange_status():
 
 
 @router.post("/test-connection")
-async def test_connection(body: dict = {}):
-    """测试 API 连接，返回详细诊断信息"""
+async def test_connection(body: dict = {}, _user: dict = Depends(require_admin)):
+    """测试 API 连接，返回详细诊断信息（v2.0: 仅管理员）"""
     api_key = body.get("api_key", settings.EXCHANGE_API_KEY)
     secret = body.get("secret", settings.EXCHANGE_SECRET)
     passphrase = body.get("passphrase", settings.EXCHANGE_PASSPHRASE)
