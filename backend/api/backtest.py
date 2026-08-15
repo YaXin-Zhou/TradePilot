@@ -6,9 +6,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from services.backtest_service import (
     fetch_ohlcv, run_backtest, save_to_history, get_history, clear_history,
     get_total_attempts, reset_attempts,
-    _mock_ohlcv, _to_df,
 )
-import pandas as pd
 
 router = APIRouter(prefix="/api/backtest", tags=["backtest"])
 
@@ -53,8 +51,8 @@ async def api_backtest_data(body: dict):
 
     ohlcv_df, is_mock = fetch_ohlcv(symbol, timeframe, limit)
     if is_mock:
-        raw = _mock_ohlcv(limit)
-        return {"success": True, "data": raw, "_mock": True}
+        # v5: 交易所失败返回空数据，不生成假 K 线
+        return {"success": True, "data": [], "_mock": True}
 
     ohlcv_df["timestamp"] = ohlcv_df["timestamp"].astype(int) // 10**9
     records = ohlcv_df.to_dict(orient="records")

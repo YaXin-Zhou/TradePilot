@@ -3,12 +3,12 @@
 改动：
   - 单 OKX WS 连接 → 多客户端广播（fan-out），避免 N 客户端 = N 上游连接
   - 指数退避重连（3s→6s→12s→30s 上限）
-  - 不再永久进入模拟 fallback（模拟只是首次等待时的过渡）
+  - v5: 移除模拟价格引擎 — 断线重连期间不再向客户端推送伪造随机价格，
+    客户端保留最后一条真实行情，直至连接恢复。
   - 支持多交易对订阅
 """
 import asyncio
 import json
-import random
 import time
 from typing import Set
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -17,30 +17,6 @@ import websockets
 from config import settings
 
 router = APIRouter()
-
-
-# ------------------------------------------------------------------
-# 模拟价格引擎（仅首次连接 OKX 超时过渡用）
-# ------------------------------------------------------------------
-
-class SimulatedPriceEngine:
-    def __init__(self, base_price: float = 86500.0):
-        self.price = base_price
-
-    async def tick(self) -> dict:
-        step = random.gauss(0, 20)
-        self.price += step
-        self.price = max(50000, min(120000, self.price))
-        spread = random.uniform(1, 15)
-        return {
-            "type": "ticker", "symbol": "BTC/USDT",
-            "last": round(self.price, 2),
-            "bid": round(self.price - spread / 2, 2),
-            "ask": round(self.price + spread / 2, 2),
-            "volume": round(random.uniform(100, 500), 2),
-            "timestamp": int(time.time() * 1000),
-            "_simulated": True,
-        }
 
 
 # ------------------------------------------------------------------
@@ -99,7 +75,6 @@ class TickerFanOut:
 
         sub = {"op": "subscribe", "args": [{"channel": "tickers", "instId": okx_inst}]}
         reconnect_idx = 0
-        sim = SimulatedPriceEngine()
 
         while self._clients:  # 无客户端时退出
             try:
@@ -140,11 +115,7 @@ class TickerFanOut:
             if self._clients:
                 interval = self.RECONNECT_INTERVALS[min(reconnect_idx, len(self.RECONNECT_INTERVALS) - 1)]
                 reconnect_idx += 1
-                # 过渡期用模拟数据填充（避免客户端长时间无数据）
-                try:
-                    await self._broadcast(await sim.tick())
-                except Exception:
-                    pass
+                # v5: 不再推送模拟价格；客户端保留最后一条真实行情
                 await asyncio.sleep(interval)
 
         from core.logger import log

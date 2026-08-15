@@ -3,7 +3,6 @@ import json
 import time as timemod
 import pathlib
 import pandas as pd
-import random
 from core.exchange import ExchangeClient
 from config import settings
 from strategies.backtest import BacktestEngine
@@ -22,29 +21,6 @@ _backtest_exchange = ExchangeClient(
 HISTORY_DIR = pathlib.Path(__file__).parent.parent / "data"
 HISTORY_FILE = HISTORY_DIR / "backtest_history.json"
 ATTEMPTS_FILE = HISTORY_DIR / "total_attempts.json"
-
-
-def _mock_ohlcv(count=500):
-    data = []
-    price = 85000
-    t = int(timemod.time() * 1000) - count * 3600000
-    for i in range(count):
-        change = random.uniform(-400, 400)
-        vol = random.uniform(50, 200)
-        data.append({
-            "timestamp": t / 1000,
-            "open": price,
-            "high": price + abs(change) + random.uniform(10, 50),
-            "low": price - abs(change) - random.uniform(10, 50),
-            "close": price + change,
-            "volume": vol,
-            "symbol": "BTC/USDT",
-        })
-        price += change * 0.3
-        price = max(price, 50000)
-        price = min(price, 120000)
-        t += 3600000
-    return data
 
 
 def _to_df(ohlcv_data: list) -> pd.DataFrame:
