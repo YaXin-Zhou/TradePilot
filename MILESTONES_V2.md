@@ -100,14 +100,14 @@
 > 目标：让 CI 真变红、Windows 能本地开发、生产能起 HTTPS。
 
 ### 3.1 CI 真正有效
-- [ ] 删除 `ci.yml` 里所有 `|| true`
-- [ ] 补 `pytest-timeout` 依赖，或移除 `--timeout` 参数
-- [ ] 统一 Python 版本（CI 3.12 vs Docker 3.13 vs pyproject 3.13）
+- [x] 删除 `ci.yml` 里所有 `|| true`（pytest/npm test 失败即红）
+- [x] 移除 `--timeout` 参数（依赖缺失导致测试从未真正跑）
+- [x] 统一 Python 版本为 3.13
 
 ### 3.2 部署与跨平台
-- [ ] `database.py` 的 `import fcntl` 加 Windows 兜底（`msvcrt` 或直接跳过锁）
-- [ ] `scheduler.py` 的 `OR IGNORE` → `ON CONFLICT DO NOTHING`（PostgreSQL）
-- [ ] 锁定 `pandas-ta`/`pandas` 兼容版本（当前 0.4.71b0 + 3.0.3 会 import 崩溃）
+- [x] `database.py` 的 `import fcntl` 加 Windows 兜底（无 fcntl 时跳过文件锁）
+- [x] `scheduler.py` 的 `OR IGNORE` → `ON CONFLICT DO NOTHING`（PostgreSQL，SQLite 保留 OR IGNORE）
+- [x] 锁定 `pandas<2.0`（兼容 pandas-ta 0.4.71b0）
 - [ ] HTTPS 真正生效：挂载 `nginx.ssl.conf` 或用 envsubst 模板注入 DOMAIN
 - [ ] DB/Redis 弱凭据改必填占位 + 端口默认不发布宿主；Redis 加 `requirepass`
 

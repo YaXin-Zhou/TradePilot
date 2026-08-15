@@ -68,7 +68,6 @@ async def _try_alembic_upgrade() -> bool:
     其余 worker 等待并跳过（避免 4 个 Alembic 同时跑造成 DB 锁竞争）。
     锁超时 120s，超时后 worker 回退到 create_all。
     """
-    import fcntl
     import time as _time
     from pathlib import Path
     import sys
@@ -78,28 +77,36 @@ async def _try_alembic_upgrade() -> bool:
     if not alembic_ini.exists():
         return False
 
-    lock_file = backend_dir / "data" / ".init.lock"
-    lock_file.parent.mkdir(parents=True, exist_ok=True)
-    lock_fd = open(str(lock_file), "w")
-
+    # v2.0: Windows 无 fcntl，跳过文件锁（本地开发单进程，无多 worker 竞态）
     try:
-        # 非阻塞尝试获取锁 → 如果已有 worker 在迁移，直接跳过
-        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except (BlockingIOError, OSError):
-        # 另一个 worker 正在执行迁移，等待它完成
-        waited = 0
-        while waited < 120:
-            _time.sleep(1)
-            waited += 1
-            try:
-                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except (BlockingIOError, OSError):
-                pass
-        else:
-            # 等待超时，回退到 create_all
-            lock_fd.close()
-            return False
+        import fcntl
+        _has_fcntl = True
+    except ImportError:
+        _has_fcntl = False
+
+    lock_fd = None
+    if _has_fcntl:
+        lock_file = backend_dir / "data" / ".init.lock"
+        lock_file.parent.mkdir(parents=True, exist_ok=True)
+        lock_fd = open(str(lock_file), "w")
+        try:
+            # 非阻塞尝试获取锁 → 如果已有 worker 在迁移，直接跳过
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (BlockingIOError, OSError):
+            # 另一个 worker 正在执行迁移，等待它完成
+            waited = 0
+            while waited < 120:
+                _time.sleep(1)
+                waited += 1
+                try:
+                    fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except (BlockingIOError, OSError):
+                    pass
+            else:
+                # 等待超时，回退到 create_all
+                lock_fd.close()
+                return False
 
     try:
         from alembic.config import Config
@@ -121,7 +128,8 @@ async def _try_alembic_upgrade() -> bool:
             print(f"[init_db] Alembic upgrade failed, falling back to create_all: {e}")
         return False
     finally:
-        lock_fd.close()
+        if lock_fd is not None:
+            lock_fd.close()
 
 
 def _migrate_orders_table(conn):

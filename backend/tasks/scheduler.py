@@ -23,6 +23,16 @@ async def sync_market_data():
     from db.models import Strategy, StrategyStatus, MarketData
     from sqlalchemy import select
     from core.exchange import shared_exchange
+    from config import settings
+
+    # v2.0: 跨数据库 upsert（SQLite 用 OR IGNORE，PostgreSQL 用 ON CONFLICT DO NOTHING）
+    if "sqlite" in settings.DATABASE_URL.lower():
+        insert_stmt = MarketData.__table__.insert().prefix_with("OR IGNORE")
+    else:
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        insert_stmt = pg_insert(MarketData.__table__).on_conflict_do_nothing(
+            index_elements=["symbol", "timeframe", "timestamp"]
+        )
 
     async with async_session() as session:
         result = await session.execute(
@@ -37,8 +47,7 @@ async def sync_market_data():
                         ts = row["timestamp"]
                         if isinstance(ts, datetime):
                             ts = ts.replace(tzinfo=timezone.utc)
-                        stmt = MarketData.__table__.insert().prefix_with("OR IGNORE")
-                        await session.execute(stmt, {
+                        await session.execute(insert_stmt, {
                             "symbol": s.symbol, "timeframe": "1h",
                             "timestamp": ts, "open": row["open"],
                             "high": row["high"], "low": row["low"],
