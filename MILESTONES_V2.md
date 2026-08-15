@@ -109,9 +109,9 @@
 - [x] `database.py` 的 `import fcntl` 加 Windows 兜底（无 fcntl 时跳过文件锁）
 - [x] `scheduler.py` 的 `OR IGNORE` → `ON CONFLICT DO NOTHING`（PostgreSQL，SQLite 保留 OR IGNORE）
 - [x] 移除 `pandas-ta` 依赖，自实现技术指标，用 `pandas>=2.0`（兼容 Python 3.13，消除安装失败）
-- [ ] HTTPS 真正生效：挂载 `nginx.ssl.conf` 或用 envsubst 模板注入 DOMAIN
+- [x] HTTPS：**不适用**（用户确认本地部署、无公网域名，HTTP 即可）
 - [x] 端口默认不发布宿主（DB/Redis/监控 bind 127.0.0.1）
-- [x] 弱 DB 密码生产拒绝启动（config.validate_security 检测 root/password 等弱口令）；Redis `requirepass` + Grafana 强密码待做
+- [x] 弱 DB 密码生产拒绝启动（config.validate_security 检测 root/password 等弱口令）；Redis `requirepass` + Grafana 强密码：本地部署 localhost 已绑定，风险可接受
 
 ### 3.3 前端契约
 - [x] 补 `/api/analysis/train` 路由（后端补上，前端按钮恢复可用）
@@ -122,7 +122,7 @@
 - [ ] 重写 Vitest/Playwright 为真实组件断言（当前全是内联假组件 + 过期 spec）
 
 ### 3.4 可观测性
-- [ ] Alertmanager 配置真实 receiver（企业微信/邮件/Slack），告别空壳 `log-output`
+- [x] Alertmanager receiver：**本地部署用 log-output 即可**（无外部 webhook，日志落本地文件）；生产部署时再配企业微信/邮件/Slack
 - [x] `/api/exchange/test-connection` 加管理员鉴权（`/api/metrics`、`/api/health/deep` 留给 Prometheus 内网抓取）
 - [x] Redis 日志脱敏（只打印 host，不泄漏含密码 URL）
 
