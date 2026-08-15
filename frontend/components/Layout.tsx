@@ -187,7 +187,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             >
               <Menu size={18} />
             </button>
-            <h1 className="text-sm font-medium text-dark-200">
+            <h1 className="text-sm font-medium text-dark-200 prompt">
             {t(NAV_ITEMS.find((n) => n.href === router.pathname)?.label || "nav.dashboard")}
           </h1>
           </div>
@@ -219,8 +219,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               {lang === "zh" ? "English" : "中文"}
             </button>
             <div className="flex items-center gap-2 text-xs">
-              <span className={`w-2 h-2 rounded-full ${isMock ? "bg-okx-yellow" : "bg-okx-green"} animate-pulse`} />
-              <span className="text-dark-400">
+              <span className={`status-dot ${isMock ? "warn" : "on"}`} />
+              <span className="text-dark-400 cursor-blink">
                 {isMock
                   ? (lang === "zh" ? "模拟模式" : "Simulation")
                   : exchangeStatus?.testnet
@@ -228,7 +228,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                     : "OKX Live"}
               </span>
               {exchangeStatus?.latency_ms != null && !isMock && (
-                <span className="text-dark-500">{exchangeStatus.latency_ms}ms</span>
+                <span className="text-dark-500 num">{exchangeStatus.latency_ms}ms</span>
               )}
             </div>
           </div>

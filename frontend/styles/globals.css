@@ -2,15 +2,22 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+   终端极客风 Terminal Aesthetic（参考 风格.md）
+   暗底绿字 + 等宽字体 + $ 提示符 + ASCII 分隔线 + 克制色板
+   ============================================================ */
+
 :root {
-  --bg-primary: #0d0d0d;
-  --bg-card: #1a1a1a;
-  --bg-hover: #252525;
-  --border-color: #2a2a2a;
-  --text-primary: #eaecef;
-  --text-secondary: #848e9c;
-  --green: #00c076;
-  --red: #f6465d;
+  --bg-primary: #0a0d0a;          /* 近黑，微微偏绿 */
+  --bg-card: #101510;
+  --bg-hover: #1a201a;
+  --border-color: #233023;
+  --text-primary: #d5e8d5;        /* 偏绿的白，替代纯白 */
+  --text-secondary: #6f806f;      /* 灰绿，次级文字 */
+  --green: #00e676;               /* 终端绿（涨/正常） */
+  --red: #ff5252;                 /* 红（跌/危险） */
+  --yellow: #f0b90b;              /* 黄（警告） */
+  --cyan: #18dcff;                /* 青（信息/链接） */
 }
 
 * {
@@ -22,82 +29,177 @@ html, body {
   padding: 0;
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  /* 终端风：等宽字体为主（交易面板几乎全是数据/短标签） */
+  font-family: "JetBrains Mono", "Cascadia Code", "SF Mono", Consolas, "Courier New", monospace;
   -webkit-font-smoothing: antialiased;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+::selection {
+  background: rgba(0, 230, 118, 0.25);
 }
 
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #333;
-  border-radius: 3px;
+  background: #2a352a;
+  border-radius: 0;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #555;
+  background: #3a4a3a;
 }
 
 input, select, textarea {
-  background: #141414;
+  background: #0c110c;
   border: 1px solid var(--border-color);
   color: var(--text-primary);
-  border-radius: 6px;
+  border-radius: 3px;
   padding: 8px 12px;
   outline: none;
-  transition: border-color 0.15s;
+  font-family: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 input:focus, select:focus, textarea:focus {
   border-color: var(--green);
+  box-shadow: 0 0 0 1px rgba(0, 230, 118, 0.25);
 }
 
 @layer components {
+  /* 终端窗口卡片：带标题栏（$ 提示符 + 状态点） */
   .card {
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: 8px;
-    padding: 16px;
+    border-radius: 4px;
+    padding: 14px;
+    position: relative;
   }
+
+  /* $ 提示符 */
+  .prompt::before {
+    content: "$ ";
+    color: var(--green);
+    font-weight: 600;
+  }
+
+  /* 状态点（连接/模式指示） */
+  .status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+  }
+  .status-dot.on { background: var(--green); box-shadow: 0 0 6px rgba(0,230,118,0.7); }
+  .status-dot.off { background: var(--red); }
+  .status-dot.warn { background: var(--yellow); }
+
+  /* 闪烁光标（轻量运行提示，尊重减少动效） */
+  .cursor-blink::after {
+    content: "▊";
+    margin-left: 2px;
+    color: var(--green);
+    animation: terminal-blink 1.1s steps(2, start) infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cursor-blink::after { animation: none; }
+  }
+  @keyframes terminal-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+
   .btn-primary {
     background: var(--green);
-    color: #000;
-    font-weight: 600;
+    color: #04120a;
+    font-weight: 700;
     padding: 8px 20px;
-    border-radius: 6px;
-    border: none;
+    border-radius: 3px;
+    border: 1px solid var(--green);
     cursor: pointer;
-    transition: opacity 0.15s;
+    font-family: inherit;
+    transition: opacity 0.15s, background 0.15s;
   }
   .btn-primary:hover {
-    opacity: 0.85;
+    background: #00f57e;
   }
   .btn-danger {
-    background: var(--red);
-    color: #fff;
-    font-weight: 600;
+    background: transparent;
+    color: var(--red);
+    font-weight: 700;
     padding: 8px 20px;
-    border-radius: 6px;
-    border: none;
+    border-radius: 3px;
+    border: 1px solid var(--red);
     cursor: pointer;
+    font-family: inherit;
+    transition: background 0.15s, color 0.15s;
+  }
+  .btn-danger:hover {
+    background: rgba(255, 82, 82, 0.12);
   }
   .btn-ghost {
     background: transparent;
     color: var(--text-secondary);
     padding: 8px 16px;
-    border-radius: 6px;
+    border-radius: 3px;
     border: 1px solid var(--border-color);
     cursor: pointer;
+    font-family: inherit;
     transition: all 0.15s;
   }
   .btn-ghost:hover {
     background: var(--bg-hover);
     color: var(--text-primary);
+    border-color: var(--green);
   }
+
   .text-green { color: var(--green); }
   .text-red { color: var(--red); }
+  .text-cyan { color: var(--cyan); }
+
+  /* 数字/价格统一等宽（已是全局，这里给 tabular 对齐） */
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* ASCII 分隔线：────┤标题├──── */
+.ascii-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  user-select: none;
+}
+.ascii-divider::before,
+.ascii-divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px dashed var(--border-color);
+}
+.ascii-divider > .ascii-label {
+  padding: 0 4px;
+}
+
+/* 表格：终端风紧凑边框 */
+table {
+  border-collapse: collapse;
+}
+th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 11px;
 }
 
 /* Responsive helpers */
