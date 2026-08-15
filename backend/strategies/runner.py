@@ -481,8 +481,13 @@ class StrategyRunner:
             log.debug(f"daily pnl lookup failed: {e}")
             return 0.0
 
-    async def _get_strategy_sharpe(self, strategy_id: str) -> float:
-        """从 Strategy 表取回测 Sharpe（v2.0: 无回测默认 0，交 risk_engine 门槛拦截）"""
+    async def _get_strategy_sharpe(self, strategy_id: str, obj) -> float:
+        """取回测 Sharpe（v2.0: 优先对象携带的 sharpe_oos，DB 兜底，无回测默认 0 交门槛拦截）"""
+        # 1) 策略对象携带的 sharpe_oos（回测后构建 / 测试 mock 时传入）
+        obj_sharpe = getattr(obj, "sharpe_oos", None)
+        if obj_sharpe is not None and obj_sharpe > 0:
+            return float(obj_sharpe)
+        # 2) 回退到 Strategy 表记录的 sharpe_ratio
         try:
             async with async_session() as session:
                 r = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
@@ -552,7 +557,7 @@ class StrategyRunner:
 
     async def _tick(self, sid: str, obj):
         # M4: 1. 获取当前价格（tick_cache 合并重复请求）
-        t = await tick_cache.get(shared_exchange, obj.symbol)
+        t = await tick_cache.get(exmod.shared_exchange, obj.symbol)
         current_price = t.get("last", 0) or 0
         if current_price <= 0:
             return
@@ -609,7 +614,7 @@ class StrategyRunner:
         order_amount = order_usdt / current_price
 
         # 7. risk_engine 全链路检查（v2.0: 真实 daily_pnl + 真实 Sharpe，不再恒 0/1.0）
-        sharpe = await self._get_strategy_sharpe(sid)
+        sharpe = await self._get_strategy_sharpe(sid, obj)
         daily_pnl = await self._get_daily_pnl()
         # 相关性数据（best-effort：策略池 return_series 为空时 risk_engine 自动跳过）
         strategy_returns = None

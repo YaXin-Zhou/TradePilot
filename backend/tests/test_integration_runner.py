@@ -13,6 +13,7 @@ from strategies.base import SignalType
 from services.regime_detector import MarketRegime, RegimeResult
 from services.stop_loss import StopLossManager, StopLossConfig, StopReason
 from db.models import StrategyType
+from core.tick_cache import tick_cache
 
 
 def _uptrend_ohlcv(symbol: str = "BTC/USDT") -> pd.DataFrame:
@@ -49,13 +50,13 @@ def runner():
 def mock_exchange():
     """Mock shared_exchange 的所有网络调用"""
     patches = [
-        patch("strategies.runner.shared_exchange.fetch_ticker",
+        patch("core.exchange.shared_exchange.fetch_ticker",
               return_value={"last": 50000}),
-        patch("strategies.runner.shared_exchange.fetch_ohlcv",
+        patch("core.exchange.shared_exchange.fetch_ohlcv",
               return_value=_uptrend_ohlcv()),
-        patch("strategies.runner.shared_exchange.fetch_balance",
+        patch("core.exchange.shared_exchange.fetch_balance",
               return_value={"USDT": {"total": 10000}}),
-        patch("strategies.runner.shared_exchange.create_market_order",
+        patch("core.exchange.shared_exchange.create_market_order",
               return_value={"id": "ord1", "status": "closed"}),
     ]
     for p in patches:
@@ -84,7 +85,7 @@ class TestRunnerIntegration:
         await runner._tick("strat1", obj)
 
         # 验证下单被调用
-        from strategies.runner import shared_exchange
+        from core.exchange import shared_exchange
         # create_market_order 被调用（通过 to_thread）
         assert shared_exchange.create_market_order.called
         # 止损管理器已初始化
@@ -98,7 +99,7 @@ class TestRunnerIntegration:
         """HOLD 信号 → 不下单"""
         obj = _make_strategy_obj(signal_type=SignalType.HOLD)
         await runner._tick("strat1", obj)
-        from strategies.runner import shared_exchange
+        from core.exchange import shared_exchange
         assert not shared_exchange.create_market_order.called
 
     @pytest.mark.asyncio
@@ -113,7 +114,7 @@ class TestRunnerIntegration:
         with patch("strategies.runner.regime_detector.detect", return_value=result):
             obj = _make_strategy_obj(stype=StrategyType.MA_CROSS)
             await runner._tick("strat1", obj)
-        from strategies.runner import shared_exchange
+        from core.exchange import shared_exchange
         assert not shared_exchange.create_market_order.called
 
     @pytest.mark.asyncio
@@ -128,7 +129,7 @@ class TestRunnerIntegration:
         runner._positions_qty["strat1"] = 0.01  # 持仓 0.01 BTC
         sm = runner._stop_managers["strat1"]
         # hard_stop_pct 默认 8%，entry=50000，跌到 45000 = -10%
-        with patch("strategies.runner.shared_exchange.fetch_ticker",
+        with patch("core.exchange.shared_exchange.fetch_ticker",
                    return_value={"last": 45000}):
             obj.analyze = AsyncMock(return_value=MagicMock(type=SignalType.HOLD))
             await runner._tick("strat1", obj)
@@ -140,7 +141,9 @@ class TestRunnerIntegration:
     @pytest.mark.asyncio
     async def test_tick_exception_does_not_crash(self, runner):
         """fetch_ticker 异常 → 记录日志不崩溃（修复 except: pass）"""
-        with patch("strategies.runner.shared_exchange.fetch_ticker",
+        # v2.0: 清空 tick_cache，避免上一个测试的缓存命中导致异常不触发
+        tick_cache.invalidate()
+        with patch("core.exchange.shared_exchange.fetch_ticker",
                    side_effect=RuntimeError("network down")):
             # _tick 内部不 catch 通用异常（由 _run_loop catch）
             # 这里直接调 _tick 验证它抛出，_run_loop 会 catch
@@ -186,7 +189,7 @@ class TestRunnerIntegration:
 
         await runner._close_position("strat1", "BTC/USDT", "long")
 
-        from strategies.runner import shared_exchange
+        from core.exchange import shared_exchange
         # 验证下单数量是 0.05（记录的），不是 0.001
         args = shared_exchange.create_market_order.call_args
         assert args[0][2] == 0.05  # 第3个位置参数 = amount

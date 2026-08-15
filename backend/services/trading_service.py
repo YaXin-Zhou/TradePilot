@@ -304,7 +304,7 @@ async def _reconcile_order_by_client_id(account_id: str, symbol: str, side: str,
 async def _get_price(symbol: str) -> float:
     """获取最新价格（M2: 改用 tick_cache，async 不阻塞事件循环）"""
     try:
-        t = await tick_cache.get(shared_exchange, symbol)
+        t = await tick_cache.get(exmod.shared_exchange, symbol)
         return t.get("last", 0) or 0
     except Exception:
         return 0

@@ -146,7 +146,10 @@ class TestParseVariants:
             {"strategy_type": "ma_crossover", "params": {"fast": 15, "slow": 45}},
         ])
         result = _parse_variants(content)
-        assert result[0]["rationale"] == ""
+        # v2.0: _validate_variants 会为缺失字段补默认值（含 rationale）
+        assert result[0]["rationale"] == "Auto-generated ma_crossover variant"
+        assert result[0]["params"]["fast"] == 15
+        assert result[0]["params"]["slow"] == 45
 
 
 # ─── 排序 ──────────────────────────────────────────────────────
