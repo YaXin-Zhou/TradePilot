@@ -83,7 +83,7 @@
 ### 2.3 AI 闭环闭合
 - [x] 补 `ml.models.train_model` 函数（scheduler 每 24h 引用但函数不存在）
 - [x] `ai_heartbeat` 字段名对齐 `PoolStrategy`（`strategy_id/sharpe/max_drawdown` → `id/running_sharpe/running_max_dd` + summary 键名）
-- [ ] AI 迭代用滚动/前进式窗口 + purge/embargo，避免 OOS 泄漏（待做）
+- [x] AI 迭代用 walk-forward 前进式窗口（每轮切不同 500 根窗口，降低 OOS 跨轮复用）
 - [x] 交易所断连时**禁止**用随机模拟数据做「科学验证」（is_mock 时中止迭代）
 - [x] `ma_cross.py`/`bollinger.py` 的 `analyze()` 补真实实现（当前恒 HOLD）
 - [x] 修复 `GridStrategy` 构造签名不匹配（`runner.py` vs `grid.py`）

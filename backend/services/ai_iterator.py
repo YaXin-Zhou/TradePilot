@@ -665,6 +665,28 @@ def _generate_random_variants(count: int) -> list[dict]:
 
 # ─── 主循环 ────────────────────────────────────────────────────
 
+WALK_FORWARD_WINDOW = 500   # 每轮回测窗口 K 线数
+WALK_FORWARD_STEP = 200     # 每轮向前推进的 K 线数（walk-forward）
+
+
+def _slice_walk_forward_window(full_df, round_num: int,
+                               window: int = WALK_FORWARD_WINDOW,
+                               step: int = WALK_FORWARD_STEP):
+    """从完整历史数据切出第 round_num 轮的 walk-forward 窗口。
+
+    v2.0: 每轮向前推进 step 根 K 线，使各轮的 OOS 窗口不同，
+    降低「同一 500 根窗口反复被 Top-K 反馈搜索」的跨轮过拟合。
+    """
+    if full_df is None or len(full_df) == 0:
+        return full_df
+    start = (round_num - 1) * step
+    end = start + window
+    if len(full_df) <= start:
+        # 数据不足以向前推进，回退到最近 window 根
+        return full_df.iloc[-window:].reset_index(drop=True)
+    return full_df.iloc[start:end].reset_index(drop=True)
+
+
 async def _run_round(
     task_id: str,
     round_num: int,
@@ -675,6 +697,7 @@ async def _run_round(
     risk: dict,
     capital: float = 10000,
     previous_rounds: list[dict] | None = None,
+    full_df=None,
 ) -> dict:
     """执行一轮迭代：生成 → 回测 → 检验 → 排序"""
     rd = IterationRound(round_number=round_num, status="generating")
@@ -725,13 +748,22 @@ async def _run_round(
     # 限制数量
     variants_raw = variants_raw[:variants_count]
 
-    # 4. 获取回测数据（v2.0: 交易所断连时禁止用随机模拟数据做「科学验证」）
-    df, is_mock = fetch_ohlcv(symbol, timeframe, 500)
-    if is_mock or df is None or df.empty:
-        rd.status = "failed"
-        rd.error = "交易所数据不可用，拒绝在随机模拟数据上运行 AI 迭代"
-        log.error(f"Iteration {task_id} round {round_num}: exchange data unavailable (is_mock={is_mock}), abort")
-        return rd
+    # 4. 获取回测数据（v2.0: 交易所断连时禁止用随机模拟数据做「科学验证」；
+    #    walk-forward 每轮切不同窗口，降低 OOS 跨轮复用）
+    if full_df is None:
+        df, is_mock = fetch_ohlcv(symbol, timeframe, WALK_FORWARD_WINDOW)
+        if is_mock or df is None or df.empty:
+            rd.status = "failed"
+            rd.error = "交易所数据不可用，拒绝在随机模拟数据上运行 AI 迭代"
+            log.error(f"Iteration {task_id} round {round_num}: exchange data unavailable (is_mock={is_mock}), abort")
+            return rd
+    else:
+        df = _slice_walk_forward_window(full_df, round_num)
+        if df is None or df.empty:
+            rd.status = "failed"
+            rd.error = "历史数据不足，无法生成 walk-forward 窗口"
+            log.error(f"Iteration {task_id} round {round_num}: insufficient history for walk-forward, abort")
+            return rd
 
     # 5. 批量回测
     rd.status = "backtesting"
@@ -809,6 +841,17 @@ async def start_iteration(
         tasks[task_id] = d
         await _save_tasks(tasks)
 
+    # v2.0: 一次性拉取完整历史窗口，供各轮 walk-forward 切分（降低 OOS 跨轮复用泄漏）
+    fetch_limit = WALK_FORWARD_WINDOW + (max_rounds - 1) * WALK_FORWARD_STEP
+    full_df, is_mock = fetch_ohlcv(symbol, timeframe, fetch_limit)
+    if is_mock or full_df is None or full_df.empty:
+        task.status = "failed"
+        task.error = "交易所数据不可用，拒绝在随机模拟数据上运行 AI 迭代"
+        task.completed_at = time.strftime("%Y-%m-%d %H:%M:%S")
+        log.error(f"Iteration {task_id}: exchange data unavailable (is_mock={is_mock}), abort")
+        await save_progress()
+        return task_id
+
     try:
         previous_rounds: list[dict] = []
 
@@ -828,6 +871,7 @@ async def start_iteration(
                 risk=risk,
                 capital=capital,
                 previous_rounds=previous_rounds,
+                full_df=full_df,
             )
 
             task.rounds.append(rd)
