@@ -48,6 +48,8 @@ async def init_db():
             await conn.run_sync(Base.metadata.create_all)
             # M1: 迁移已有 orders 表 — 添加 account_id / idempotency_key / raw 字段
             await conn.run_sync(_migrate_orders_table)
+            # v2.0: 迁移已有 users 表 — 添加 is_admin 字段（RBAC）
+            await conn.run_sync(_migrate_users_table)
 
         # P0-2: PostgreSQL 枚举补值（必须在事务外运行，ALTER TYPE ADD VALUE 在 PG<12 不支持事务）
         await _migrate_strategytype_enum()
@@ -138,6 +140,18 @@ def _migrate_orders_table(conn):
         if col_name not in existing_cols:
             conn.execute(text(f"ALTER TABLE orders ADD COLUMN {col_name} {col_type}"))
             print(f"[M1] Migrated: orders.{col_name} added")
+
+
+def _migrate_users_table(conn):
+    """v2.0: 为已有 users 表添加 is_admin 字段（RBAC）"""
+    from sqlalchemy import inspect, text
+    inspector = inspect(conn)
+    if "users" not in inspector.get_table_names():
+        return
+    existing_cols = {c["name"] for c in inspector.get_columns("users")}
+    if "is_admin" not in existing_cols:
+        conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT FALSE"))
+        print("[v2.0] Migrated: users.is_admin added")
 
 
 async def _migrate_strategytype_enum():

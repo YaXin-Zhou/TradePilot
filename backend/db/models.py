@@ -61,6 +61,7 @@ class User(Base):
     name = Column(String(64), unique=True, nullable=False)
     email = Column(String(128), unique=True, nullable=True)
     hashed_password = Column(String(256), nullable=False)
+    is_admin = Column(Boolean, default=False)  # v2.0: RBAC，管理员可交易/管理密钥/解除紧急停止
     created_at = Column(DateTime, default=_utcnow)
     strategies = relationship("Strategy", back_populates="user")
     orders = relationship("Order", back_populates="user")

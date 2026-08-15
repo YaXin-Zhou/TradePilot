@@ -60,8 +60,8 @@
 - [x] 平仓后保留剩余仓位（部分成交不再整体丢失）
 
 ### 1.6 权限模型
-- [ ] 关闭开放注册（改邀请/首个管理员引导）
-- [ ] 引入 `role`/`is_admin`，对交易、`emergency-reset`、settings、API Key 管理强制管理员权限
+- [x] 关闭开放注册（首个用户自动成为管理员，后续需管理员邀请）
+- [x] 引入 `is_admin` + `require_admin`，对交易、`emergency-reset`、settings、API Key 管理强制管理员权限
 
 ---
 

@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from db.database import async_session
 from db.models import AppConfig
-from auth.deps import get_current_user
+from auth.deps import get_current_user, require_admin
 from core.crypto import encrypt, decrypt, mask_sensitive
 from core.logger import log
 from config import settings as global_settings
@@ -311,7 +311,7 @@ def _is_masked_or_empty(value: str) -> bool:
 @router.post("/exchange")
 async def save_exchange_config(
     req: ExchangeConfigRequest,
-    _user: dict = Depends(get_current_user),
+    _user: dict = Depends(require_admin),
 ):
     """保存指定模式（testnet/live）的 API Key 配置。
 
@@ -369,7 +369,7 @@ async def save_exchange_config(
 @router.post("/exchange/switch")
 async def switch_active_mode(
     req: SwitchModeRequest,
-    _user: dict = Depends(get_current_user),
+    _user: dict = Depends(require_admin),
 ):
     """切换当前激活的交易所模式（testnet/live）。
 
@@ -421,7 +421,7 @@ async def switch_active_mode(
 @router.post("/exchange/test")
 async def test_exchange_config(
     req: ExchangeConfigRequest,
-    _user: dict = Depends(get_current_user),
+    _user: dict = Depends(require_admin),
 ):
     """测试连接 + 校验权限（不保存）
 
@@ -530,7 +530,7 @@ async def get_deepseek_config(_user: dict = Depends(get_current_user)):
 @router.post("/deepseek")
 async def save_deepseek_config(
     req: DeepSeekConfigRequest,
-    _user: dict = Depends(get_current_user),
+    _user: dict = Depends(require_admin),
 ):
     """保存 DeepSeek API Key（加密存 DB + 热更新全局 settings）
 
@@ -574,7 +574,7 @@ async def save_deepseek_config(
 @router.post("/deepseek/test")
 async def test_deepseek_config(
     req: DeepSeekConfigRequest,
-    _user: dict = Depends(get_current_user),
+    _user: dict = Depends(require_admin),
 ):
     """测试 DeepSeek API Key（不保存）
 

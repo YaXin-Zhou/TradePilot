@@ -11,7 +11,7 @@
   - limit-order / market-order 加 confirm_live 参数（实盘二次确认）
 """
 from fastapi import APIRouter, Depends
-from auth.deps import get_current_user
+from auth.deps import get_current_user, require_admin
 from config import settings
 from pydantic import BaseModel
 from services.trading_service import (
@@ -66,7 +66,7 @@ async def api_get_balance(_user: dict = Depends(get_current_user)):
 
 
 @router.post("/limit-order")
-async def api_limit_order(req: LimitOrderRequest, _user: dict = Depends(get_current_user)):
+async def api_limit_order(req: LimitOrderRequest, _user: dict = Depends(require_admin)):
     order, error, is_mock = await place_limit_order(
         _user.get("id", "system"), req.symbol, req.side, req.amount, req.price,
         confirm_live=req.confirm_live,
@@ -81,7 +81,7 @@ async def api_limit_order(req: LimitOrderRequest, _user: dict = Depends(get_curr
 
 
 @router.post("/cancel-order")
-async def api_cancel_order(req: CancelOrderRequest, _user: dict = Depends(get_current_user)):
+async def api_cancel_order(req: CancelOrderRequest, _user: dict = Depends(require_admin)):
     """Phase 8: 真正调用交易所撤单（原为空操作）"""
     ok, msg = await cancel_order(req.order_id, req.symbol)
     if not ok:
@@ -90,14 +90,14 @@ async def api_cancel_order(req: CancelOrderRequest, _user: dict = Depends(get_cu
 
 
 @router.post("/cancel-all")
-async def api_cancel_all(symbol: str = "", _user: dict = Depends(get_current_user)):
+async def api_cancel_all(symbol: str = "", _user: dict = Depends(require_admin)):
     """撤销所有挂单（可指定交易对）"""
     n, msg = await cancel_all_orders(symbol)
     return {"success": True, "data": {"cancelled_count": n, "message": msg}}
 
 
 @router.post("/market-order")
-async def api_market_order(req: MarketOrderRequest, _user: dict = Depends(get_current_user)):
+async def api_market_order(req: MarketOrderRequest, _user: dict = Depends(require_admin)):
     order, error, is_mock = await place_market_order(
         _user.get("id", "system"), req.symbol, req.side, req.amount,
         confirm_live=req.confirm_live,
@@ -140,7 +140,7 @@ async def api_kill_switch_status(_user: dict = Depends(get_current_user)):
 
 
 @router.post("/emergency-stop")
-async def api_emergency_stop(req: EmergencyStopRequest, _user: dict = Depends(get_current_user)):
+async def api_emergency_stop(req: EmergencyStopRequest, _user: dict = Depends(require_admin)):
     """触发紧急停止：撤所有挂单 + 市价平所有持仓 + 停所有策略
 
     需 confirm=true 才执行。触发后所有交易被冻结，需 POST /emergency-reset 解除。
@@ -162,7 +162,7 @@ async def api_emergency_stop(req: EmergencyStopRequest, _user: dict = Depends(ge
 
 
 @router.post("/emergency-reset")
-async def api_emergency_reset(req: EmergencyResetRequest, _user: dict = Depends(get_current_user)):
+async def api_emergency_reset(req: EmergencyResetRequest, _user: dict = Depends(require_admin)):
     """解除紧急停止。需 confirm=true 才执行。"""
     if not req.confirm:
         return {"success": False, "error": "需 confirm=true 才能解除紧急停止"}
@@ -192,7 +192,7 @@ def get_manual_risk_settings(_user: dict = Depends(get_current_user)):
 
 
 @router.put("/manual-risk-settings")
-async def update_manual_risk_settings(req: ManualRiskSettings, _user: dict = Depends(get_current_user)):
+async def update_manual_risk_settings(req: ManualRiskSettings, _user: dict = Depends(require_admin)):
     """更新手动交易风控设置"""
     import json
     from sqlalchemy import text
