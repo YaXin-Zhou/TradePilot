@@ -11,10 +11,10 @@
 |---|---|---|
 | 消除前视偏差（信号用 T-1 / shift） | ✅ 已完成 | 回测 MA/RSI/布林带已 `shift(1)` |
 | Walk-Forward 前进式窗口 | ✅ 已完成 | AI 迭代每轮切不同窗口 |
-| 回测真实成本（手续费/滑点） | 🟡 待校准 | 已有基础版，需按 OKX 永续真实费率校准 |
-| 统计指标交叉验证（别手写） | 🟡 待换库 | DSR/NW 已修正；**PBO/SPA 仍是退化的手写实现** |
-| 参数空间过拟合控制 | 🟡 可加强 | 已有 walk-forward，可再加「缩减参数空间 + 30% 样本外」 |
-| 因子 IC 检验 | 🔴 待做 | `feature_engine` 大量特征是硬编码 0，需先真实化再验 IC |
+| 回测真实成本（手续费/滑点） | ✅ 已完成 | OKX 永续 taker 0.05% + 资金费率 + 滑点 0.05% |
+| 统计指标交叉验证（别手写） | ✅ 已完成 | DSR/NW 已修正；PBO(CSCV)/SPA 已严格实现 |
+| 参数空间过拟合控制 | ✅ 已有 | walk-forward + CSCV PBO；可再缩参数空间 |
+| 因子 IC 检验 | ✅ 已完成 | `ic_analysis.py` 提供 IC/ICIR；核心因子已真实化 |
 | 四层风控 + 多实例容错 | ✅ 已完成 | kill_switch → 硬上限 → 白名单 → risk_engine + 乐观锁 |
 
 ---
@@ -27,19 +27,19 @@
 - [x] 回测成本校准：OKX 永续 taker fee 0.05% + 资金费率（≈0.01%/8h）+ 滑点 0.05%，替换原 0.1% 固定值
 
 ### B. 因子 / 特征（P2）
-- [ ] `feature_engine` 特征去硬编码（OI/funding/basis/资金流等当前恒 0）
-- [ ] 对真实特征做 IC/ICIR 检验，筛选有效因子后再喂 ML
+- [x] `feature_engine` 特征去硬编码：资金费率/期货基差/多空比接 OKX 真实接口，成交量特征（volume_regime/buy_volume_ratio）从 OHLCV 推导，MACD signal bug 修复；剩余 `oi_large_trader`/`btc_dominance`/`stablecoin_flow` 等需额外数据源（CoinGecko/链上），已标注
+- [x] 对真实特征做 IC/ICIR 检验：新增 `ic_analysis.py`（Spearman IC + 分周期 ICIR + `analyze_ohlcv_factors`）
 
 ### C. 合约交易（当前联调）
 - [x] OKX 账户从「简易模式」切到「跨币种保证金 + 双向持仓」（用户操作，错误码 51010 已解决）
 - [x] 切换后验证合约下单 → 持仓 → 平仓全链路（下单/持仓/平仓均验证通过）
-- [ ] 清理之前误下到现货的 0.01 BTC（测试盘，可选）
+- [ ] 清理之前误下到现货的 0.01 BTC（测试盘，可选 —— 可在 OKX 后台手动卖出，不影响合约）
 
 ### D. 工程化 / 部署（P2）
-- [ ] HTTPS 真正生效（nginx 443 + Let's Encrypt，需域名）
-- [ ] Alertmanager 接真实 receiver（企业微信/邮件/Slack，需 webhook）
-- [ ] Redis requirepass + Grafana 强密码（需协调 .env）
-- [ ] 前端测试重写为真实组件断言（需安装 npm 依赖）
+- [ ] HTTPS 真正生效（nginx 443 + Let's Encrypt，需域名 —— 本地部署不适用，部署时再做）
+- [ ] Alertmanager 接真实 receiver（需 webhook 凭据 —— 本地用 log-output 即可）
+- [ ] Redis requirepass + Grafana 强密码（需协调 .env —— 本地单机未启用 Redis/Grafana）
+- [x] 前端测试重写为真实组件断言（commit 094fcaf 已完成，tsc 4 处类型错误已修复）
 
 ---
 

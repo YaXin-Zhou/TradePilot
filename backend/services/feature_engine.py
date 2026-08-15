@@ -251,13 +251,18 @@ class FeatureHub:
         # --- 成交量类 ---
         features["volume_change_1h"] = float((volumes[-1] / volumes[-2] - 1) * 100) if len(volumes) >= 2 else 0
         vol_ma20 = np.mean(volumes[-20:])
-        features["volume_vs_ma_20"] = float((volumes[-1] / vol_ma20 - 1) * 100) if vol_ma20 > 0 else 0
+        vol_ratio = float((volumes[-1] / vol_ma20 - 1) * 100) if vol_ma20 > 0 else 0
+        features["volume_vs_ma_20"] = vol_ratio
         features["volume_price_trend"] = cls._vpt(closes, volumes)
         features["obv_divergence"] = cls._obv_divergence(closes, volumes)
         features["vwap_deviation"] = cls._vwap_deviation(closes, highs, lows, volumes)
-        features["large_trade_ratio"] = 0.0  # 需要逐笔数据
-        features["buy_volume_ratio"] = 0.0   # 需要逐笔数据
-        features["volume_regime"] = 0.0
+        features["large_trade_ratio"] = 0.0  # 需要逐笔成交流水（OKX 大单数据），暂不可从 OHLCV 推得
+        # 主动买入量代理：近 20 根「上涨 K 线成交量」占比
+        up_vol = sum(volumes[i] for i in range(-20, 0) if i - 1 >= -len(closes) and closes[i] > closes[i - 1])
+        tot_vol = float(np.sum(volumes[-20:]))
+        features["buy_volume_ratio"] = float(up_vol / tot_vol) if tot_vol > 0 else 0.5
+        # 成交量状态：>1.5 倍均量=放量(+1)、<0.5 倍=缩量(-1)、否则 0
+        features["volume_regime"] = 1.0 if vol_ratio > 50 else (-1.0 if vol_ratio < -50 else 0.0)
 
         return features
 
