@@ -418,12 +418,10 @@ def run_full_validation(
         result.sharpe_oos = bt_oos.sharpe_ratio
         result.max_dd_oos = bt_oos.max_drawdown_pct
 
-        # 4. PBO
-        pbo_params = _extract_pbo_params(strategy_type, params, strategy_runner)
-        result.pbo = compute_pbo(is_data, oos_data, strategy_runner, strategy_type, pbo_params)
-        result.pbo_warning = result.pbo > 0.5
-        if result.pbo_warning:
-            warnings.append(f"PBO={result.pbo:.2%} > 50%，过拟合风险高")
+        # 4. PBO（v2.0: 已弃用——原实现为单配置 bootstrap、OOS 固定导致恒 0，且 CSCV 需跨变体矩阵）
+        # 多重试验过拟合校正由下方 DSR（真实公式）承担，不再计算 PBO。
+        result.pbo = 0.0
+        result.pbo_warning = False
 
         # 5. DSR（v2.0: 真实公式，用 OOS 收益的偏度/峰度 + OOS Sharpe）
         oos_rets = _equity_to_returns(bt_oos.equity_curve)
@@ -447,22 +445,12 @@ def run_full_validation(
             if not result.bh_passed:
                 warnings.append(f"BH 检验未通过：p={current_p:.4f} > 阈值={bh_threshold:.4f}")
 
-        # 8. SPA（以买入持有为基准）
-        if len(oos_rets) > 0:
-            # 买入持有基准：OOS 数据价格的收益率
-            if "close" in oos_data.columns:
-                benchmark_prices = oos_data["close"].values
-                benchmark_rets = np.diff(benchmark_prices) / benchmark_prices[:-1]
-                benchmark_rets = benchmark_rets[~np.isnan(benchmark_rets)]
-                if len(benchmark_rets) > 0:
-                    result.spa_p_value = compute_spa(oos_rets, benchmark_rets, n_bootstrap=1000)
-                    result.spa_passed = result.spa_p_value < 0.05
-                    if not result.spa_passed:
-                        warnings.append(f"SPA p={result.spa_p_value:.4f} ≥ 0.05，策略不显著优于买入持有")
+        # 8. SPA（v2.0: 已弃用——原实现去中心化 bootstrap 逻辑错误导致恒 p≈0，
+        # 恒通过无判别力；且 Hansen 的 stationary bootstrap 需正确 studentized max，暂不手写）
+        # 策略是否优于基准的显著性由 DSR（多重试验校正）+ NW t（均值显著性）承担。
+        result.spa_passed = None
 
         # 9. 综合判定 Scientific（v2.0: 用 DSR + NW t 统计量做真实显著性判定）
-        # PBO/SPA 当前实现退化（PBO 恒 0、SPA 恒通过），待换 quantstats 前暂不参与判定，
-        # 避免「假通过」给错误信心。改用 DSR（多重试验校正）+ NW t（均值显著性）。
         base_checks = [
             result.sharpe_oos > 0,
             result.dsr >= 0.5,        # 50% 概率非过拟合

@@ -17,6 +17,8 @@ httpx==0.28.1
 # ML（ml/models.py 需要）
 scikit-learn>=1.5.0
 numpy>=1.26.0
+# 统计指标（v2.0: Sharpe/Sortino 等用成熟库，替代手写）
+quantstats>=0.0.62
 # N4: 数据库迁移
 alembic>=1.13.0
 psycopg2-binary>=2.9.0  # alembic 同步驱动（asyncpg 不能直接被 alembic 用）

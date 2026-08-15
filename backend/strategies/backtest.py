@@ -38,6 +38,7 @@ class BacktestResult:
     total_trades: int
     winning_trades: int
     losing_trades: int
+    sortino_ratio: float = 0.0  # v2.0: quantstats 计算
     avg_win: float = 0.0
     avg_loss: float = 0.0
     profit_factor: float = 0.0
@@ -197,14 +198,19 @@ class BacktestEngine:
               if losing and abs(sum(t.pnl for t in losing)) > 0 else 999.99)
         total_return = self.capital - self.initial_capital
         total_return_pct = (total_return / self.initial_capital) * 100
-        sharpe, max_dd, max_dd_pct = 0.0, 0.0, 0.0
+        sharpe, sortino, max_dd, max_dd_pct = 0.0, 0.0, 0.0, 0.0
         if self.equity_curve:
             eq_vals = [e["equity"] for e in self.equity_curve]
             eq_series = pd.Series(eq_vals)
             rets = eq_series.pct_change().dropna()
             if len(rets) > 0:
-                # v2.0: 1h K 线年化因子 = sqrt(24*365)（此前误用 365 致 Sharpe 低估约 4.9 倍）
-                sharpe = round(float(rets.mean() / rets.std() * np.sqrt(24 * 365)), 2) if rets.std() > 0 else 0
+                # v2.0: 用 quantstats 成熟库计算（1h K 线，年化周期 = 24*365）
+                try:
+                    import quantstats as qs
+                    sharpe = round(float(qs.stats.sharpe(rets, periods=24 * 365)), 2)
+                    sortino = round(float(qs.stats.sortino(rets, periods=24 * 365)), 2)
+                except Exception:
+                    sharpe = round(float(rets.mean() / rets.std() * np.sqrt(24 * 365)), 2) if rets.std() > 0 else 0
             peak = eq_series.expanding().max()
             dd = eq_series - peak
             dd_pct = dd / peak * 100
@@ -220,6 +226,7 @@ class BacktestEngine:
             total_return=round(total_return, 2),
             total_return_pct=round(total_return_pct, 2),
             sharpe_ratio=sharpe,
+            sortino_ratio=sortino,
             max_drawdown=round(max_dd, 2),
             max_drawdown_pct=round(max_dd_pct, 2),
             win_rate=round(win_rate, 2),
