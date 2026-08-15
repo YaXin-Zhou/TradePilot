@@ -201,18 +201,45 @@ def benjamini_hochberg(p_values: list[float], alpha: float = 0.05) -> tuple[list
 # ─── DSR 通胀夏普 ──────────────────────────────────────────────
 
 
-def compute_dsr(sharpe: float, total_attempts: int) -> float:
-    """
-    Deflated Sharpe Ratio
+def compute_dsr(returns: np.ndarray, sharpe: float, total_attempts: int) -> float:
+    """Deflated Sharpe Ratio（Bailey & López de Prado 2014 真实公式）
 
-    DSR = Sharpe × √(1 - 1/N)，其中 N = total_attempts（尝试过策略总数）
+    DSR = Φ( (SR - SR₀)·√(N-1) / √(1 - γ₃·SR + ((γ₄-1)/4)·SR²) )
 
-    N=1 时 DSR=0（不能自我验证），N 越大 → √(1-1/N) 越接近 1
+    其中：
+      SR₀ = √(1/(T-1)) · ((1-γ)·Φ⁻¹(1-1/N) + γ·Φ⁻¹(1-1/(N·e)))
+      γ₃ = 收益偏度，γ₄ = 收益峰度，γ = 欧拉-马歇罗尼常数，e = 欧拉数
+
+    返回 [0,1] 概率：越高表示越不可能因 N 次试验过拟合而虚高。
+    旧实现 SR×√(1-1/N) 是伪公式，已移除。
     """
-    if total_attempts <= 1:
+    from scipy.stats import norm, skew, kurtosis
+
+    T = len(returns)
+    N = total_attempts
+    if T < 5 or N <= 1:
         return 0.0
-    deflator = np.sqrt(1 - 1 / total_attempts)
-    return round(float(sharpe * deflator), 4)
+
+    # 偏度 / 峰度（scipy fisher=True 返回 excess kurtosis，+3 得峰度）
+    gamma3 = float(skew(returns))
+    gamma4 = float(kurtosis(returns, fisher=True)) + 3.0
+
+    # 零假设（所有 N 次试验真实 Sharpe=0）下的期望最大 Sharpe
+    euler_gamma = 0.5772156649015329
+    e = 2.718281828459045
+    var_sr = 1.0 / (T - 1)
+    try:
+        z1 = float(norm.ppf(1.0 - 1.0 / N))
+        z2 = float(norm.ppf(1.0 - 1.0 / (N * e)))
+    except (ValueError, ZeroDivisionError):
+        return 0.0
+    sr0 = np.sqrt(var_sr) * ((1.0 - euler_gamma) * z1 + euler_gamma * z2)
+
+    num = (sharpe - sr0) * np.sqrt(N - 1)
+    den = np.sqrt(1.0 - gamma3 * sharpe + ((gamma4 - 1.0) / 4.0) * sharpe * sharpe)
+    if den <= 0 or not np.isfinite(den):
+        return 0.0
+    return round(float(norm.cdf(num / den)), 4)
 
 
 # ─── Newey-West 修正 ───────────────────────────────────────────
@@ -398,8 +425,9 @@ def run_full_validation(
         if result.pbo_warning:
             warnings.append(f"PBO={result.pbo:.2%} > 50%，过拟合风险高")
 
-        # 5. DSR
-        result.dsr = compute_dsr(max(result.sharpe_is, result.sharpe_oos), total_attempts)
+        # 5. DSR（v2.0: 真实公式，用 OOS 收益的偏度/峰度 + OOS Sharpe）
+        oos_rets = _equity_to_returns(bt_oos.equity_curve)
+        result.dsr = compute_dsr(oos_rets, result.sharpe_oos, total_attempts)
 
         # 6. Newey-West
         nw = compute_newey_west(equity_curve)
@@ -420,7 +448,6 @@ def run_full_validation(
                 warnings.append(f"BH 检验未通过：p={current_p:.4f} > 阈值={bh_threshold:.4f}")
 
         # 8. SPA（以买入持有为基准）
-        oos_rets = _equity_to_returns(bt_oos.equity_curve)
         if len(oos_rets) > 0:
             # 买入持有基准：OOS 数据价格的收益率
             if "close" in oos_data.columns:
@@ -433,15 +460,15 @@ def run_full_validation(
                     if not result.spa_passed:
                         warnings.append(f"SPA p={result.spa_p_value:.4f} ≥ 0.05，策略不显著优于买入持有")
 
-        # 9. 综合判定 Scientific
-        # 全部通过条件：Sharpe OOS > 0 且 PBO < 0.5 且 BH 通过 且 SPA 通过（或 SPA 不可用）
+        # 9. 综合判定 Scientific（v2.0: 用 DSR + NW t 统计量做真实显著性判定）
+        # PBO/SPA 当前实现退化（PBO 恒 0、SPA 恒通过），待换 quantstats 前暂不参与判定，
+        # 避免「假通过」给错误信心。改用 DSR（多重试验校正）+ NW t（均值显著性）。
         base_checks = [
             result.sharpe_oos > 0,
-            result.pbo <= 0.5,
+            result.dsr >= 0.5,        # 50% 概率非过拟合
+            result.nw_t_stat > 1.65,  # 单侧 5% 显著
             result.bh_passed,
         ]
-        if result.spa_passed is not None:
-            base_checks.append(result.spa_passed)
         result.scientific_passed = all(base_checks)
 
     except Exception as e:

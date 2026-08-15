@@ -116,23 +116,36 @@ class TestBenjaminiHochberg:
 
 
 class TestDSR:
-    """通胀夏普"""
+    """Deflated Sharpe Ratio（Bailey & López de Prado 2014）"""
 
-    def test_dsr_with_attempts(self):
-        dsr = compute_dsr(2.0, 100)
-        assert dsr < 2.0
-        assert dsr > 0
+    @staticmethod
+    def _returns(n: int = 250) -> np.ndarray:
+        """构造确定性正均值收益序列（近似正态）"""
+        rng = np.random.RandomState(42)
+        return rng.normal(0.001, 0.02, n)
 
-    def test_dsr_single_attempt(self):
+    def test_dsr_is_probability(self):
+        dsr = compute_dsr(self._returns(), 1.0, 100)
+        assert 0.0 <= dsr <= 1.0
+
+    def test_dsr_single_attempt_zero(self):
         """只有一次尝试时 DSR = 0（不能自我验证）"""
-        dsr = compute_dsr(3.0, 1)
-        assert dsr == 0.0
+        assert compute_dsr(self._returns(), 3.0, 1) == 0.0
 
-    def test_dsr_converges(self):
-        """N 很大时 DSR 接近原始 Sharpe"""
-        dsr100 = compute_dsr(2.0, 100)
-        dsr1000 = compute_dsr(2.0, 1000)
-        assert dsr1000 > dsr100  # 更多尝试 → 更接近原始值
+    def test_dsr_deflates_with_more_trials(self):
+        """更多尝试 → 期望最大 Sharpe 更高 → DSR 更低（更严）"""
+        rets = self._returns()
+        dsr100 = compute_dsr(rets, 0.2, 100)
+        dsr1000 = compute_dsr(rets, 0.2, 1000)
+        assert dsr1000 < dsr100
+
+    def test_dsr_increases_with_sharpe(self):
+        """更高 Sharpe → 更高 DSR"""
+        rets = self._returns()
+        assert compute_dsr(rets, 0.4, 100) > compute_dsr(rets, 0.15, 100)
+
+    def test_dsr_insufficient_data_zero(self):
+        assert compute_dsr(np.array([0.01]), 1.0, 100) == 0.0
 
 
 class TestNeweyWest:
