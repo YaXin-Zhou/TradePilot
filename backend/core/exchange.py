@@ -158,23 +158,40 @@ class ExchangeClient:
     def is_testnet(self) -> bool:
         return self._testnet
 
+    def _to_swap_symbol(self, symbol: str) -> str:
+        """将 'BASE/QUOTE' 解析为默认类型（swap）市场的 symbol（如 'BTC/USDT:USDT'）。
+
+        v2.1: ccxt 的 market('BTC/USDT') 会解析到现货，需显式映射到合约市场，
+        否则下单/行情都落在现货而非永续合约。已是 ':QUOTE' 形式则原样返回。
+        """
+        if not symbol or ":" in symbol:
+            return symbol
+        try:
+            base, _, quote = symbol.partition("/")
+            for m in self._exchange.markets.values():
+                if m.get("base") == base and m.get("quote") == quote and m.get("swap"):
+                    return m.get("symbol") or symbol
+        except Exception:
+            pass
+        return symbol
+
     def fetch_ticker(self, symbol: str) -> dict:
         self._try_reconnect()
         if not self._connected:
             raise ConnectionError("offline")
         try:
-            t = self._exchange.fetch_ticker(symbol)
+            t = self._exchange.fetch_ticker(self._to_swap_symbol(symbol))
             self._mark_success()  # FIX: 成功后标记连接正常（原代码错误地设为 False）
             return {
                 "symbol": symbol,
-                "bid": float(t.get("bid", 0)),
-                "ask": float(t.get("ask", 0)),
-                "last": float(t.get("last", 0)),
-                "high": float(t.get("high", 0)),
-                "low": float(t.get("low", 0)),
-                "volume": float(t.get("baseVolume", 0)),
-                "quote_volume": float(t.get("quoteVolume", 0)),
-                "change_pct": float(t.get("percentage", 0)),
+                "bid": float(t.get("bid") or 0),
+                "ask": float(t.get("ask") or 0),
+                "last": float(t.get("last") or 0),
+                "high": float(t.get("high") or 0),
+                "low": float(t.get("low") or 0),
+                "volume": float(t.get("baseVolume") or 0),
+                "quote_volume": float(t.get("quoteVolume") or 0),
+                "change_pct": float(t.get("percentage") or 0),
                 "timestamp": t.get("timestamp", 0),
             }
         except Exception as e:
@@ -186,7 +203,7 @@ class ExchangeClient:
         if not self._connected:
             raise ConnectionError("offline")
         try:
-            ohlcv = self._exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+            ohlcv = self._exchange.fetch_ohlcv(self._to_swap_symbol(symbol), timeframe, limit=limit)
             df = pd.DataFrame(
                 ohlcv,
                 columns=["timestamp", "open", "high", "low", "close", "volume"],
@@ -204,7 +221,7 @@ class ExchangeClient:
         if not self._connected:
             raise ConnectionError("offline")
         try:
-            ob = self._exchange.fetch_order_book(symbol, limit)
+            ob = self._exchange.fetch_order_book(self._to_swap_symbol(symbol), limit)
             self._mark_success()  # FIX
             return {
                 "bids": [[float(p), float(v)] for p, v in ob.get("bids", [])],
@@ -221,7 +238,8 @@ class ExchangeClient:
         if not self._connected:
             raise ConnectionError('offline')
         try:
-            bal = self._exchange.fetch_balance()
+            # v2.1: 只跑合约，显式查 swap 账户余额（USDT 保证金），避免混入现货 BTC
+            bal = self._exchange.fetch_balance({"type": "swap"})
             self._mark_success()  # FIX
             if currency:
                 c = bal.get(currency, {})
@@ -257,6 +275,8 @@ class ExchangeClient:
         if not self._connected:
             return []
         try:
+            if symbols:
+                symbols = [self._to_swap_symbol(s) for s in symbols]
             positions = self._exchange.fetch_positions(symbols)
             self._mark_success()
             result = []
@@ -282,7 +302,7 @@ class ExchangeClient:
 
     def _to_price(self, symbol: str, price: float) -> float:
         self._ensure_markets()
-        return float(self._exchange.price_to_precision(symbol, price))
+        return float(self._exchange.price_to_precision(self._to_swap_symbol(symbol), price))
 
     def get_contract_size(self, symbol: str) -> float:
         """获取合约 contractSize（现货市场返回 1.0）。
@@ -303,7 +323,7 @@ class ExchangeClient:
 
     def _to_amount(self, symbol: str, amount: float) -> float:
         self._ensure_markets()
-        return float(self._exchange.amount_to_precision(symbol, amount))
+        return float(self._exchange.amount_to_precision(self._to_swap_symbol(symbol), amount))
 
     def create_limit_order(self, symbol: str, side: str, amount: float, price: float,
                            client_order_id: Optional[str] = None) -> Optional[dict]:
@@ -314,7 +334,9 @@ class ExchangeClient:
             params: dict = {}
             if client_order_id:
                 params["clientOrderId"] = client_order_id
-            order = self._exchange.create_limit_order(symbol, side, amount, price, params or None)
+            order = self._exchange.create_limit_order(
+                self._to_swap_symbol(symbol), side, amount, price, params or None
+            )
             self._mark_success()
             return {
                 "id": order.get("id"),
@@ -342,7 +364,9 @@ class ExchangeClient:
                 params["reduceOnly"] = True
             if client_order_id:
                 params["clientOrderId"] = client_order_id
-            order = self._exchange.create_market_order(symbol, side, amount, None, params or None)
+            order = self._exchange.create_market_order(
+                self._to_swap_symbol(symbol), side, amount, None, params or None
+            )
             self._mark_success()
             return {
                 "id": order.get("id"),
@@ -362,7 +386,7 @@ class ExchangeClient:
     def fetch_order(self, order_id: str, symbol: str) -> Optional[dict]:
         self._ensure_markets()
         try:
-            o = self._exchange.fetch_order(order_id, symbol)
+            o = self._exchange.fetch_order(order_id, self._to_swap_symbol(symbol))
             self._mark_success()
             return {
                 "id": o.get("id"),
@@ -383,7 +407,9 @@ class ExchangeClient:
         """按 clientOrderId 反查订单（v2.0: 超时/失败后对账用）。"""
         self._ensure_markets()
         try:
-            o = self._exchange.fetch_order(client_order_id, symbol, {"clientOrderId": client_order_id})
+            o = self._exchange.fetch_order(
+                client_order_id, self._to_swap_symbol(symbol), {"clientOrderId": client_order_id}
+            )
             self._mark_success()
             if o is None:
                 return None
@@ -405,7 +431,7 @@ class ExchangeClient:
 
     def cancel_order(self, order_id: str, symbol: str) -> bool:
         try:
-            self._exchange.cancel_order(order_id, symbol)
+            self._exchange.cancel_order(order_id, self._to_swap_symbol(symbol))
             self._mark_success()
             return True
         except Exception as e:
@@ -418,7 +444,7 @@ class ExchangeClient:
         self._ensure_markets()
         try:
             if symbol:
-                orders = self._exchange.fetch_open_orders(symbol)
+                orders = self._exchange.fetch_open_orders(self._to_swap_symbol(symbol))
             else:
                 orders = self._exchange.fetch_open_orders()
             cancelled = 0
@@ -438,7 +464,7 @@ class ExchangeClient:
     def fetch_open_orders(self, symbol: str) -> list[dict]:
         self._ensure_markets()
         try:
-            orders = self._exchange.fetch_open_orders(symbol)
+            orders = self._exchange.fetch_open_orders(self._to_swap_symbol(symbol))
             self._mark_success()
             return [
                 {
@@ -462,7 +488,7 @@ class ExchangeClient:
         if not self._connected:
             return []
         try:
-            trades = self._exchange.fetch_my_trades(symbol, limit=limit)
+            trades = self._exchange.fetch_my_trades(self._to_swap_symbol(symbol), limit=limit)
             self._mark_success()
             return [
                 {
