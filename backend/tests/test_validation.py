@@ -11,6 +11,7 @@ from services.validation import (
     compute_sharpe,
     compute_max_drawdown,
     compute_pbo,
+    compute_cscv_pbo,
     benjamini_hochberg,
     compute_dsr,
     compute_newey_west,
@@ -188,6 +189,22 @@ class TestSPA:
         p = compute_spa(np.array([0.01, -0.01]), np.array([0.01, -0.01]))
         assert p == 1.0
 
+    def test_spa_better_with_noise(self):
+        """策略带噪声地优于基准 → p 应显著（小）"""
+        np.random.seed(42)
+        benchmark = np.random.normal(0.001, 0.02, 300)
+        better = np.random.normal(0.001 + 0.003, 0.02, 300)
+        p = compute_spa(better, benchmark, n_bootstrap=500)
+        assert p < 0.1
+
+    def test_spa_equal_with_noise(self):
+        """策略与基准同分布 → p 不应显著"""
+        np.random.seed(43)
+        benchmark = np.random.normal(0.001, 0.02, 300)
+        other = np.random.normal(0.001, 0.02, 300)
+        p = compute_spa(other, benchmark, n_bootstrap=500)
+        assert p > 0.05
+
 
 class TestPBO:
     """PBO 过拟合概率"""
@@ -200,3 +217,27 @@ class TestPBO:
         oos_data = sample_data.iloc[int(n * 0.7):]
         assert len(is_data) > 0
         assert len(oos_data) > 0
+
+
+class TestCSCVPBO:
+    """CSCV PBO（Bailey et al. 2015）正确实现"""
+
+    def test_cscv_low_for_stable_best(self):
+        """config 0 显著最优（大幅领先）→ PBO 应低"""
+        np.random.seed(0)
+        returns = np.random.normal(0, 0.02, (320, 5))
+        returns[:, 0] += 0.01  # config 0 每根多 1%（显著优势）
+        pbo = compute_cscv_pbo(returns, n_splits=16)
+        assert pbo < 0.3
+
+    def test_cscv_high_for_random(self):
+        """所有 config 纯噪声 → IS 最优是随机的 → PBO ≈ 0.5"""
+        np.random.seed(1)
+        returns = np.random.normal(0, 0.02, (320, 5))
+        pbo = compute_cscv_pbo(returns, n_splits=16)
+        assert 0.2 < pbo < 0.8
+
+    def test_cscv_single_config_degenerate(self):
+        """单 config 无法做 CSCV → 返回 0.5"""
+        returns = np.random.normal(0, 0.02, (200, 1))
+        assert compute_cscv_pbo(returns) == 0.5

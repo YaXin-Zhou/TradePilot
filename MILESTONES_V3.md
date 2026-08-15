@@ -22,8 +22,8 @@
 ## 二、待办清单（Todo）
 
 ### A. 统计可信度（P1）
-- [ ] **PBO 换成熟库**：当前 PBO 恒 0（退化），改用 `quantstats`/`vectorbt` 的 CSCV 实现
-- [ ] **SPA 换成熟库**：当前 SPA 恒 p≈0（退化），改用库的 stationary bootstrap + studentized max
+- [x] **PBO 严格实现**：新增 `compute_cscv_pbo`（Bailey et al. 2015 组合对称交叉验证，多 config 收益矩阵）
+- [x] **SPA 严格实现**：修复 bootstrap 统计量 bug（原多减 mean_d 致恒 p≈0），改用移动块 bootstrap + 正确 null 分布
 - [x] 回测成本校准：OKX 永续 taker fee 0.05% + 资金费率（≈0.01%/8h）+ 滑点 0.05%，替换原 0.1% 固定值
 
 ### B. 因子 / 特征（P2）

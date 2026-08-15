@@ -161,6 +161,56 @@ def compute_pbo(
     return round(float(pbo), 4)
 
 
+def compute_cscv_pbo(returns_matrix, n_splits: int = 16, random_seed: int = 42) -> float:
+    """CSCV PBO（Bailey, Borwein, López de Prado & Zhu 2015）— 正确实现
+
+    参数:
+      returns_matrix: shape (n_trials, n_configs)，每个 config 的收益率序列（等长）
+
+    返回 PBO ∈ [0,1]：IS 最优 config 在 OOS 中的平均相对排名（越高越可能过拟合）。
+    注意：CSCV 需要「多个 config 的收益矩阵」，单 config 无法计算（退化为 0）。
+    """
+    from itertools import combinations
+
+    M = np.asarray(returns_matrix, dtype=np.float64)
+    if M.ndim != 2:
+        return 0.5
+    n_trials, n_configs = M.shape
+    if n_trials < n_splits or n_configs < 2:
+        return 0.5
+
+    split_size = n_trials // n_splits
+    if split_size < 1:
+        return 0.5
+    sub = [M[i * split_size:(i + 1) * split_size] for i in range(n_splits)]
+
+    half = n_splits // 2
+    combos = list(combinations(range(n_splits), half))
+    if not combos:
+        return 0.5
+
+    pbo_sum = 0.0
+    for combo in combos:
+        is_idx = sorted(combo)
+        oos_idx = sorted(set(range(n_splits)) - set(combo))
+        is_sharpe = _sharpe_vector(np.vstack([sub[i] for i in is_idx]))
+        oos_sharpe = _sharpe_vector(np.vstack([sub[i] for i in oos_idx]))
+        is_best = int(np.argmax(is_sharpe))
+        # IS 最优 config 在 OOS 中比多少 config 差（相对排名，归一化到 [0,1]）
+        oos_rank = int(np.sum(oos_sharpe > oos_sharpe[is_best]))
+        pbo_sum += oos_rank / (n_configs - 1)
+
+    return round(float(pbo_sum / len(combos)), 4)
+
+
+def _sharpe_vector(returns_matrix: np.ndarray) -> np.ndarray:
+    """对每列（config）计算 Sharpe（不年化，排名不受年化因子影响）"""
+    mean = np.mean(returns_matrix, axis=0)
+    std = np.std(returns_matrix, axis=0, ddof=1)
+    std = np.where(std == 0, 1e-9, std)
+    return mean / std
+
+
 # ─── BH 动态门槛 ───────────────────────────────────────────────
 
 
@@ -331,22 +381,22 @@ def compute_spa(
     if spa_obs == 0:
         return 1.0
 
-    # Bootstrap
+    # Bootstrap（移动块法，保持自相关）
     rng = np.random.RandomState(random_seed)
-    centered = d - mean_d  # 去中心化（Ho 下均值为 0）
+    centered = d - mean_d  # 去中心化（H0 下均值为 0）
     spa_boot = []
     block_size = max(5, int(np.sqrt(T)))
 
     for _ in range(n_bootstrap):
-        # 分块 Bootstrap（保持自相关结构）
         boot_sample = _block_bootstrap(centered, block_size, rng)
-        boot_mean = np.mean(boot_sample)
+        boot_mean = np.mean(boot_sample)   # ≈0，但携带抽样波动（这就是 H0 下的分布）
         boot_std = np.std(boot_sample, ddof=1)
         if boot_std == 0:
             spa_boot.append(0)
             continue
-        # 重新中心化到 Ho：观测值减真实均值，加 0（Ho 下期望为 0）
-        spa_val = max((boot_mean - mean_d) / boot_std * np.sqrt(T), 0)
+        # v2.1 修复：统计量用 boot_mean（已去中心化，均值≈0、有方差），
+        # 原代码多减了 mean_d 导致 boot_mean-mean_d ≈ -mean_d < 0 → spa_val 恒 0 → p 恒 0
+        spa_val = max(boot_mean / boot_std * np.sqrt(T), 0)
         spa_boot.append(spa_val)
 
     spa_boot = np.array(spa_boot)

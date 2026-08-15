@@ -47,14 +47,16 @@ class TestTradingEndpoint:
     """交易 API 路由"""
 
     @pytest.mark.asyncio
-    async def test_market_order_requires_auth(self, client):
+    async def test_market_order_no_auth(self, client):
+        """v2.1 免登录：无 token 也能请求（风控/参数校验由业务层处理）"""
         response = await client.post("/api/trading/market-order", json={
             "symbol": "BTC/USDT", "side": "buy", "amount": 100
         })
-        # 未认证时应返回 401 或 403
-        assert response.status_code in (401, 403, 422)
+        # 免登录后不再返回 401/403；amount=100 张会触发金额硬上限拒绝，仍返回 200 业务响应
+        assert response.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_balance_requires_auth(self, client):
+    async def test_balance_no_auth(self, client):
+        """v2.1 免登录：无 token 也能查询余额"""
         response = await client.get("/api/trading/balance")
-        assert response.status_code in (401, 403)
+        assert response.status_code == 200
