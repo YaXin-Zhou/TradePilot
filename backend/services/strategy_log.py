@@ -29,6 +29,12 @@ _db_queue: list[dict] = []
 _db_lock = threading.Lock()
 
 
+def _is_sqlite() -> bool:
+    """检测当前是否 SQLite（本地开发默认），用于方言自适应的 DDL/INSERT"""
+    from config import settings
+    return "sqlite" in settings.DATABASE_URL.lower()
+
+
 def append(strategy_id: str, event_type: str, msg: str, detail: Optional[dict] = None) -> dict:
     """追加一条策略日志事件。
 
@@ -64,25 +70,41 @@ def get_logs(strategy_id: str, limit: int = 100, event_type: Optional[str] = Non
 
 
 async def _ensure_table():
-    """确保日志表存在（启动时调用）"""
+    """确保日志表存在（启动时调用，方言自适应 SQLite/PG）"""
     from sqlalchemy import text
     from db.database import engine as async_engine
+
+    if _is_sqlite():
+        # SQLite：BIGSERIAL/JSONB/TIMESTAMPTZ 不可用，改用 INTEGER/TEXT/DATETIME
+        create_sql = f"""
+            CREATE TABLE IF NOT EXISTS {_LOGS_TABLE} (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                strategy_id VARCHAR(64) NOT NULL,
+                event_type VARCHAR(32) NOT NULL,
+                message TEXT,
+                detail TEXT DEFAULT '{{}}',
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+        """
+    else:
+        create_sql = f"""
+            CREATE TABLE IF NOT EXISTS {_LOGS_TABLE} (
+                id BIGSERIAL PRIMARY KEY,
+                strategy_id VARCHAR(64) NOT NULL,
+                event_type VARCHAR(32) NOT NULL,
+                message TEXT,
+                detail JSONB DEFAULT '{{}}',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """
     try:
         async with async_engine.begin() as conn:
-            await conn.execute(text(f"""
-                CREATE TABLE IF NOT EXISTS {_LOGS_TABLE} (
-                    id BIGSERIAL PRIMARY KEY,
-                    strategy_id VARCHAR(64) NOT NULL,
-                    event_type VARCHAR(32) NOT NULL,
-                    message TEXT,
-                    detail JSONB DEFAULT '{{}}',
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                );
-            """))
+            await conn.execute(text(create_sql))
             await conn.execute(text(f"""
                 CREATE INDEX IF NOT EXISTS idx_se_logs_sid
                     ON {_LOGS_TABLE}(strategy_id, created_at DESC);
             """))
+        app_log.info("StrategyLog: table ensured")
     except Exception as e:
         app_log.warning(f"StrategyLog: ensure_table failed: {e}")
 
@@ -101,6 +123,19 @@ async def flush_to_db() -> int:
     try:
         from sqlalchemy import text
         from db.database import async_session
+
+        # 方言自适应：SQLite 的 detail 存 TEXT，PG 存 JSONB（CAST）
+        if _is_sqlite():
+            insert_sql = (
+                f"INSERT INTO {_LOGS_TABLE} (strategy_id, event_type, message, detail, created_at) "
+                "VALUES (:sid, :etype, :msg, :detail, :ts)"
+            )
+        else:
+            insert_sql = (
+                f"INSERT INTO {_LOGS_TABLE} (strategy_id, event_type, message, detail, created_at) "
+                "VALUES (:sid, :etype, :msg, CAST(:detail AS jsonb), :ts)"
+            )
+
         async with async_session() as session:
             async with session.begin():
                 for ev in batch:
@@ -109,8 +144,7 @@ async def flush_to_db() -> int:
                     if isinstance(ts, str):
                         ts = datetime.fromisoformat(ts)
                     await session.execute(
-                        text(f"INSERT INTO {_LOGS_TABLE} (strategy_id, event_type, message, detail, created_at) "
-                             "VALUES (:sid, :etype, :msg, CAST(:detail AS jsonb), :ts)"),
+                        text(insert_sql),
                         {
                             "sid": ev["strategy_id"],
                             "etype": ev["event_type"],
@@ -144,16 +178,26 @@ async def recover_from_db(strategy_id: str, limit: int = 200) -> list[dict]:
                 {"sid": strategy_id, "lim": limit},
             )
             rows = result.fetchall()
-            events = [
-                {
+            events = []
+            for row in reversed(rows):  # 反转回正序
+                # detail 可能是 dict（PG JSONB）或 JSON 字符串（SQLite TEXT），统一解析
+                detail_raw = row[3]
+                if isinstance(detail_raw, str):
+                    try:
+                        detail = json.loads(detail_raw) if detail_raw else {}
+                    except (json.JSONDecodeError, TypeError):
+                        detail = {}
+                elif isinstance(detail_raw, dict):
+                    detail = detail_raw
+                else:
+                    detail = {}
+                events.append({
                     "strategy_id": row[0],
                     "event_type": row[1],
                     "message": row[2],
-                    "detail": row[3] if isinstance(row[3], dict) else {},
+                    "detail": detail,
                     "created_at": row[4].isoformat() if row[4] else "",
-                }
-                for row in reversed(rows)  # 反转回正序
-            ]
+                })
             if events:
                 with _lock:
                     for ev in events:
