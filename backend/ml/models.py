@@ -142,3 +142,21 @@ class MLSignalPredictor:
         self.feature_columns = joblib.load(self.model_dir / "features.pkl")
         self.is_trained = True
         return True
+
+
+def train_model(symbol: str, timeframe: str = "1h", limit: int = 1000) -> dict:
+    """训练指定 symbol 的 ML 模型（v2.0: 供 scheduler 每 24h 调用）。
+
+    拉取 OHLCV → 训练 MLSignalPredictor → 返回训练指标。
+    """
+    try:
+        import core.exchange as exmod
+        df = exmod.shared_exchange.fetch_ohlcv(symbol, timeframe, limit)
+        if df is None or df.empty:
+            return {"error": f"no data for {symbol}"}
+        predictor = MLSignalPredictor()
+        return predictor.train(df)
+    except Exception as e:
+        from core.logger import log
+        log.warning(f"train_model failed for {symbol}: {e}")
+        return {"error": str(e)}

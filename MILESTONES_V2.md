@@ -80,12 +80,12 @@
 - [x] 回测信号用前一根 K 线（MA/RSI/布林带均 shift(1)），杜绝当前收盘价信号在当前收盘价成交
 
 ### 2.3 AI 闭环闭合
-- [ ] 补 `ml.models.train_model` 函数（scheduler 每 24h 引用但函数不存在）
-- [ ] `ai_heartbeat` 字段名对齐 `PoolStrategy`（`strategy_id/sharpe/max_drawdown` → `id/running_sharpe/running_max_dd`）
-- [ ] AI 迭代用滚动/前进式窗口 + purge/embargo，避免 OOS 泄漏
-- [ ] 交易所断连时**禁止**用随机模拟数据做「科学验证」，或强制透传 `is_mock` 标记
-- [ ] `ma_cross.py`/`bollinger.py` 的 `analyze()` 补真实实现（当前恒 HOLD）
-- [ ] 修复 `GridStrategy` 构造签名不匹配（`runner.py` vs `grid.py`）
+- [x] 补 `ml.models.train_model` 函数（scheduler 每 24h 引用但函数不存在）
+- [x] `ai_heartbeat` 字段名对齐 `PoolStrategy`（`strategy_id/sharpe/max_drawdown` → `id/running_sharpe/running_max_dd` + summary 键名）
+- [ ] AI 迭代用滚动/前进式窗口 + purge/embargo，避免 OOS 泄漏（待做）
+- [x] 交易所断连时**禁止**用随机模拟数据做「科学验证」（is_mock 时中止迭代）
+- [x] `ma_cross.py`/`bollinger.py` 的 `analyze()` 补真实实现（当前恒 HOLD）
+- [x] 修复 `GridStrategy` 构造签名不匹配（`runner.py` vs `grid.py`）
 
 ### 2.4 在线学习接线
 - [ ] `online_learner.update()` 挂入定时任务，权重喂给 `strategy_pool.weight` / `portfolio_allocator`

@@ -123,12 +123,12 @@ class AIHeartbeat:
 
         snapshots = [
             StrategySnapshot(
-                strategy_id=s.strategy_id,
+                strategy_id=s.id,
                 name=s.name,
                 strategy_type=s.strategy_type,
                 weight=s.weight,
-                sharpe=s.sharpe,
-                max_drawdown=s.max_drawdown,
+                sharpe=s.running_sharpe,
+                max_drawdown=s.running_max_dd,
                 consecutive_losses=s.consecutive_losses,
                 status=s.status.value,
                 total_trades=s.total_trades,
@@ -241,9 +241,9 @@ class AIHeartbeat:
             prompt = f"""You are a quantitative trading strategy auditor. Review the following strategy pool and provide specific, actionable recommendations.
 
 ## Pool Summary
-- Total: {summary.get('total', 0)}
-- Active: {summary.get('active', 0)}
-- Sleeping: {summary.get('sleeping', 0)}
+- Total: {summary.get('total_strategies', 0)}
+- Active: {summary.get('active_count', 0)}
+- Sleeping: {summary.get('sleeping_count', 0)}
 - Avg Sharpe: {summary.get('avg_sharpe', 0):.2f}
 - Max Correlation: {summary.get('max_correlation', 0):.2f}
 

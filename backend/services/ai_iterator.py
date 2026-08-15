@@ -725,8 +725,13 @@ async def _run_round(
     # 限制数量
     variants_raw = variants_raw[:variants_count]
 
-    # 4. 获取回测数据
-    df, _ = fetch_ohlcv(symbol, timeframe, 500)
+    # 4. 获取回测数据（v2.0: 交易所断连时禁止用随机模拟数据做「科学验证」）
+    df, is_mock = fetch_ohlcv(symbol, timeframe, 500)
+    if is_mock or df is None or df.empty:
+        rd.status = "failed"
+        rd.error = "交易所数据不可用，拒绝在随机模拟数据上运行 AI 迭代"
+        log.error(f"Iteration {task_id} round {round_num}: exchange data unavailable (is_mock={is_mock}), abort")
+        return rd
 
     # 5. 批量回测
     rd.status = "backtesting"

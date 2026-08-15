@@ -830,11 +830,16 @@ def _build_strategy_obj(strategy: Strategy):
         stype = strategy.type
 
         if stype == StrategyType.GRID:
+            # v2.0: 修复 GridStrategy 构造签名不匹配（原传 symbol/lower/upper，实为 strategy_id/name/config）
             return GridStrategy(
-                symbol=strategy.symbol,
-                lower=config.get("lower", settings.DEFAULT_GRID_LOWER),
-                upper=config.get("upper", settings.DEFAULT_GRID_UPPER),
-                grid_count=config.get("grid_count", settings.DEFAULT_GRID_COUNT),
+                strategy_id=str(strategy.id),
+                name=strategy.name,
+                config={
+                    "symbol": strategy.symbol,
+                    "lower_bound": config.get("lower", settings.DEFAULT_GRID_LOWER),
+                    "upper_bound": config.get("upper", settings.DEFAULT_GRID_UPPER),
+                    "grid_count": config.get("grid_count", settings.DEFAULT_GRID_COUNT),
+                },
             )
         elif stype == StrategyType.MA_CROSS or stype == StrategyType.SMA_CROSS:
             return MACrossStrategy(
