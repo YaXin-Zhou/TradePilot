@@ -249,7 +249,7 @@ export default function StrategiesPage() {
               <div><span className="text-dark-400">{t("strat.symbol")}</span><p className="font-mono text-dark-200 mt-0.5">{s.symbol}</p></div>
               <div><span className="text-dark-400">{t("strat.totalPnl")}</span><p className={`font-mono mt-0.5 ${(s.total_pnl || 0) >= 0 ? "text-green" : "text-red"}`}>{s.total_pnl?.toFixed(4)} USDT</p></div>
               <div><span className="text-dark-400">{t("strat.trades")}</span><p className="font-mono text-dark-200 mt-0.5">{s.total_trades || 0}</p></div>
-              <div><span className="text-dark-400">{t("strat.winRate")}</span><p className="font-mono text-dark-200 mt-0.5">{s.win_rate ? `${(s.win_rate * 100).toFixed(1)}%` : "-"}</p></div>
+              <div><span className="text-dark-400">{t("strat.winRate")}</span><p className="font-mono text-dark-200 mt-0.5">{s.win_rate ? `${(s.win_rate).toFixed(1)}%` : "-"}</p></div>
             </div>
             </div>
 

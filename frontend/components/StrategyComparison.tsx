@@ -57,7 +57,7 @@ export default function StrategyComparison() {
           </div>
           <div className="flex gap-4 text-xs">
             <span className="text-dark-400">Sharpe <b className="text-white">{best.sharpe_ratio?.toFixed(2) || "-"}</b></span>
-            <span className="text-dark-400">Win <b className="text-white">{best.win_rate ? `${(best.win_rate * 100).toFixed(1)}%` : "-"}</b></span>
+            <span className="text-dark-400">Win <b className="text-white">{best.win_rate ? `${(best.win_rate).toFixed(1)}%` : "-"}</b></span>
           </div>
         </div>
       )}
@@ -95,10 +95,10 @@ export default function StrategyComparison() {
                     {sharpe.toFixed(2)}
                   </td>
                   <td className="text-right py-2 font-mono text-dark-200">
-                    {s.win_rate ? `${(s.win_rate * 100).toFixed(1)}%` : "-"}
+                    {s.win_rate ? `${(s.win_rate).toFixed(1)}%` : "-"}
                   </td>
                   <td className={`text-right py-2 font-mono ${(s.max_drawdown || 0) > 0.3 ? "text-red" : "text-dark-200"}`}>
-                    {s.max_drawdown ? `${(s.max_drawdown * 100).toFixed(1)}%` : "-"}
+                    {s.max_drawdown ? `${(s.max_drawdown).toFixed(1)}%` : "-"}
                   </td>
                   <td className={`text-right py-2 font-mono ${pnl >= 0 ? "text-green" : "text-red"}`}>
                     {pnl >= 0 ? "+" : ""}{pnl.toFixed(2)}

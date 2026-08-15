@@ -59,7 +59,11 @@ def _to_df(ohlcv_data: list) -> pd.DataFrame:
 
 
 def fetch_ohlcv(symbol: str, timeframe: str, limit: int) -> tuple[pd.DataFrame, bool]:
-    """获取回测数据。返回 (df, is_mock)"""
+    """获取回测数据。返回 (df, is_mock)。
+
+    v5: 交易所失败时返回空 df + is_mock=True，不再生成随机假数据。
+    调用方据 is_mock/空 df 拒绝回测（回测必须用真实行情）。
+    """
     try:
         df = _backtest_exchange.fetch_ohlcv(symbol, timeframe, limit)
         if df is not None and len(df) > 0:
@@ -67,8 +71,7 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int) -> tuple[pd.DataFrame, 
     except Exception as e:
         log.warning(f"Backtest OHLCV fetch failed: {e}")
 
-    raw = _mock_ohlcv(limit)
-    return _to_df(raw), True
+    return pd.DataFrame(), True
 
 
 # ─── 累计策略尝试次数 ─────────────────────────────────────────

@@ -47,9 +47,12 @@ class MLSignalPredictor:
         min_len = min(len(X), len(y))
         X, y = X[:min_len], y[:min_len]
 
-        # 去掉尾部 NaN（因为 future_return 最后几个是 NaN）
-        mask = ~np.isnan(y)
-        X, y = X[mask], y[mask]
+        # v5: 去掉 y（标签）和 X（特征）中的 NaN/Inf 行
+        # 否则 GradientBoostingClassifier 会报 "Input X contains NaN"
+        y = np.asarray(y, dtype=np.float64)
+        X = np.asarray(X, dtype=np.float64)
+        valid = np.isfinite(y) & np.isfinite(X).all(axis=1)
+        X, y = X[valid], y[valid]
 
         return X, y
 
