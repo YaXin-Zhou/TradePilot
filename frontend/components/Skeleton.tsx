@@ -3,10 +3,11 @@ import React from "react";
 
 interface SkeletonProps {
   className?: string;
+  style?: React.CSSProperties;
 }
 
-function Pulse({ className = "" }: SkeletonProps) {
-  return <div className={`animate-pulse bg-[#1a1a1a] rounded ${className}`} />;
+function Pulse({ className = "", style }: SkeletonProps) {
+  return <div className={`animate-pulse bg-[#1a1a1a] rounded ${className}`} style={style} />;
 }
 
 /** 通用骨架屏 — 用于图表/卡片占位 */

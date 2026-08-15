@@ -1,50 +1,23 @@
-// v1.2: 策略卡片组件测试
+// v2.0: 真实 Skeleton 组件测试（替换旧的假 StrategyCard 测试）
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render } from "@testing-library/react";
+import Skeleton, { DashboardSkeleton, TradingSkeleton, BacktestSkeleton } from "../../components/Skeleton";
 
-interface StrategyCardProps {
-  name: string;
-  type: string;
-  symbol: string;
-  status: string;
-}
-
-function StrategyCard({ name, type, symbol, status }: StrategyCardProps) {
-  return (
-    <div data-testid="strategy-card">
-      <h3>{name}</h3>
-      <span data-testid="type">{type}</span>
-      <span data-testid="symbol">{symbol}</span>
-      <span data-testid="status">{status}</span>
-    </div>
-  );
-}
-
-describe("StrategyCard", () => {
-  it("renders strategy details", () => {
-    render(
-      <StrategyCard
-        name="MA Cross BTC"
-        type="MA_CROSS"
-        symbol="BTC/USDT"
-        status="RUNNING"
-      />
-    );
-    expect(screen.getByText("MA Cross BTC")).toBeInTheDocument();
-    expect(screen.getByTestId("type")).toHaveTextContent("MA_CROSS");
-    expect(screen.getByTestId("symbol")).toHaveTextContent("BTC/USDT");
-    expect(screen.getByTestId("status")).toHaveTextContent("RUNNING");
+describe("Skeleton（真实组件）", () => {
+  it("默认骨架屏渲染", () => {
+    const { container } = render(<Skeleton />);
+    expect(container.querySelector(".animate-pulse")).toBeInTheDocument();
   });
 
-  it("handles stopped status", () => {
-    render(
-      <StrategyCard
-        name="Grid ETH"
-        type="GRID"
-        symbol="ETH/USDT"
-        status="STOPPED"
-      />
-    );
-    expect(screen.getByTestId("status")).toHaveTextContent("STOPPED");
+  it("DashboardSkeleton 渲染多个卡片占位", () => {
+    const { container } = render(<DashboardSkeleton />);
+    const pulses = container.querySelectorAll(".animate-pulse");
+    expect(pulses.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("TradingSkeleton 与 BacktestSkeleton 正常渲染不崩溃", () => {
+    render(<TradingSkeleton />);
+    render(<BacktestSkeleton />);
+    expect(document.body).toBeTruthy();
   });
 });

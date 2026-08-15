@@ -91,8 +91,6 @@ export const api = {
 
   // Phase 8: 紧急停止（Kill Switch）
 
-  // Settings — Risk Policies
-  getRiskPolicies: () => request("/api/analysis/risk-policies"),
   getKillSwitchStatus: () => request("/api/trading/kill-switch"),
   emergencyStop: (reason = "", confirm = false) =>
     request("/api/trading/emergency-stop", {
