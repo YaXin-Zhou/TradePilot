@@ -32,7 +32,7 @@ from core.logger import log
 
 @dataclass
 class OpenInterestData:
-    """OKX 持仓数据"""
+    """OKX 持仓 + 资金费率 + 基差数据"""
     symbol: str
     oi_contracts: float               # 当前持仓合约数
     oi_usd: float                     # 持仓价值 (USD)
@@ -40,6 +40,8 @@ class OpenInterestData:
     oi_change_24h_pct: float          # 24小时 OI 变化率 %
     long_short_ratio: float           # 多空比
     ls_ratio_change_pct: float        # 多空比变化率 %
+    funding_rate: float = 0.0         # v2.1: 当前资金费率（如 0.0001 = 0.01%）
+    futures_basis_pct: float = 0.0    # v2.1: 期货基差 %（swap mark vs spot）
     timestamp: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict:
@@ -51,6 +53,8 @@ class OpenInterestData:
             "oi_change_24h_pct": round(self.oi_change_24h_pct, 4),
             "long_short_ratio": round(self.long_short_ratio, 4),
             "ls_ratio_change_pct": round(self.ls_ratio_change_pct, 4),
+            "funding_rate": round(self.funding_rate, 8),
+            "futures_basis_pct": round(self.futures_basis_pct, 6),
             "timestamp": self.timestamp,
         }
 
@@ -274,9 +278,9 @@ class FeatureHub:
         features["long_short_ratio"] = oi_data.long_short_ratio
         features["ls_ratio_change"] = oi_data.ls_ratio_change_pct
         features["oi_large_trader"] = 0.0  # 需要更多粒度数据
-        features["funding_rate"] = 0.0     # 需要 funding rate 接口
-        features["futures_basis_pct"] = 0.0
-        features["basis_regime"] = 0.0
+        features["funding_rate"] = oi_data.funding_rate          # v2.1: 真实资金费率
+        features["futures_basis_pct"] = oi_data.futures_basis_pct  # v2.1: 真实基差
+        features["basis_regime"] = 1.0 if oi_data.futures_basis_pct > 0.5 else (-1.0 if oi_data.futures_basis_pct < -0.5 else 0.0)
         features["oi_open_interest_pct"] = oi_data.oi_change_1h_pct
         features["oi_whale_activity"] = 0.0
 
@@ -357,19 +361,25 @@ class FeatureHub:
         return 0.0  # 简化为占位，完整版需价格与 RSI 背离检测
 
     @staticmethod
+    def _ema_series(values: np.ndarray, period: int) -> np.ndarray:
+        """EMA 序列（adjust=False）"""
+        alpha = 2.0 / (period + 1.0)
+        ema = np.empty_like(values, dtype=np.float64)
+        ema[0] = values[0]
+        for i in range(1, len(values)):
+            ema[i] = values[i] * alpha + ema[i - 1] * (1 - alpha)
+        return ema
+
+    @staticmethod
     def _compute_macd(closes: np.ndarray) -> tuple[float, float]:
-        if len(closes) < 26:
+        """MACD(12,26,9) — 修复原 signal==macd 的恒等 bug"""
+        if len(closes) < 26 + 9:
             return 0.0, 0.0
-        ema12 = closes[-1]
-        ema26 = closes[-1]
-        alpha_12 = 2 / 13
-        alpha_26 = 2 / 27
-        for price in closes[-50:]:
-            ema12 = price * alpha_12 + ema12 * (1 - alpha_12)
-            ema26 = price * alpha_26 + ema26 * (1 - alpha_26)
+        ema12 = FeatureHub._ema_series(closes, 12)
+        ema26 = FeatureHub._ema_series(closes, 26)
         macd_line = ema12 - ema26
-        signal_line = macd_line * 0.2 + (macd_line * 0.8)  # 简化 signal
-        return float(macd_line), float(signal_line)
+        signal_line = FeatureHub._ema_series(macd_line, 9)
+        return float(macd_line[-1]), float(signal_line[-1])
 
     @staticmethod
     def _compute_atr_pct(highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int = 14) -> float:
