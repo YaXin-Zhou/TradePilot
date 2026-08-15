@@ -222,6 +222,29 @@ async def flush_pending_order_records() -> int:
     return flushed
 
 
+async def record_strategy_order(strategy_id: str, symbol: str, side: str,
+                                amount: float, order: dict, order_type: OrderType,
+                                idempotency_key: str = "") -> None:
+    """v2.0: 记录策略（runner）下单到 orders + audit_logs，让补偿链覆盖自动交易。
+
+    runner 直接调交易所下单，本函数补上审计落库（与手动下单同一条补偿链）。
+    """
+    if not order or not order.get("id"):
+        return
+    if not idempotency_key:
+        idempotency_key = f"strategy:{strategy_id}:{order.get('id')}"
+    await _record_order_success(
+        user_id="system",
+        account_id="default",
+        symbol=symbol,
+        side=side,
+        amount=amount,
+        order_result=order,
+        order_type=order_type,
+        idempotency_key=idempotency_key,
+    )
+
+
 def _make_client_order_id() -> str:
     """生成 clientOrderId（16 位 hex，OKX 兼容，唯一且可传给交易所）"""
     return uuid.uuid4().hex[:16]

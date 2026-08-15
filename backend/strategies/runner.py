@@ -26,7 +26,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from strategies.base import SignalType
 from db.database import async_session
-from db.models import Strategy, StrategyStatus, StrategyType, RunnerState
+from db.models import Strategy, StrategyStatus, StrategyType, RunnerState, OrderType
 from sqlalchemy import select
 import core.exchange as exmod
 from core.exchange import ExchangeError
@@ -683,6 +683,13 @@ class StrategyRunner:
             log_event(sid, "order_error", f"Order exception: {e}", {"error": str(e)})
             return
 
+        # v2.0: 审计落库（自动策略订单也走 orders + audit_logs 补偿链）
+        try:
+            from services.trading_service import record_strategy_order
+            await record_strategy_order(sid, obj.symbol, side, order_amount, order, OrderType.MARKET)
+        except Exception as e:
+            log.warning(f"StrategyRunner[{sid}] strategy order record failed (non-fatal): {e}")
+
         # 9. 初始化/更新止损状态机（优先使用策略自身风控参数）
         policy = risk_engine.get_policy(regime)
         sl_config = StopLossConfig.from_policy(policy)
@@ -750,6 +757,14 @@ class StrategyRunner:
         except Exception as e:
             log.error(f"[RUNNER_CLOSE_EXCEPTION] sid={sid} error={e}")
             return
+
+        # v2.0: 审计落库（平仓订单也走 orders + audit_logs 补偿链）
+        try:
+            from services.trading_service import record_strategy_order
+            await record_strategy_order(sid, symbol, close_side, qty, order, OrderType.MARKET)
+        except Exception as e:
+            log.warning(f"StrategyRunner[{sid}] close order record failed (non-fatal): {e}")
+
         # 清理状态 + 持久化（v2.0: 部分成交时保留剩余仓位，不再整体丢失）
         remaining_qty = requested_qty - qty  # qty 已被 verified 覆盖为实际成交量
         if remaining_qty > 1e-10:

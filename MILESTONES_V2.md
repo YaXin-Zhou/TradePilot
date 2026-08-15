@@ -45,8 +45,8 @@
 - [x] 超时/失败后用 `clientOrderId` 反查交易所（`_reconcile_order_by_client_id`）再决定是否落库
 
 ### 1.3 自动策略统一走审计/落库
-- [ ] `runner` 下单改走 `trading_service` 统一入口（或等价落库逻辑），写入 `orders` + `audit_logs`
-- [ ] 让订单补偿链（重试→补偿审计→内存队列→30s 补偿）覆盖自动交易
+- [x] `runner` 下单/平仓后调用 `record_strategy_order` 写入 `orders` + `audit_logs`
+- [x] 让订单补偿链（重试→补偿审计→内存队列→30s 补偿）覆盖自动交易
 
 ### 1.4 风控五维真正生效
 - [x] runner 传入真实 `daily_pnl`（由 Trade 表汇总），日亏损熔断不再恒 0
