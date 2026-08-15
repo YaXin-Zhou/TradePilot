@@ -23,26 +23,6 @@ from core.logger import log
 from core.kill_switch import kill_switch
 from config import settings
 from services.regime_detector import MarketRegime  # kept for runner compatibility
-from services.risk_engine import risk_engine  # v2.0: manual trading risk
-
-async def _check_risk_engine(symbol: str, side: str, amount_usdt: float) -> tuple[bool, str]:
-    """v2.0: manual trading risk check using risk_engine position limits."""
-    try:
-        from services.market_service import get_ohlcv
-        ohlcv, _ = get_ohlcv(symbol, "1h", limit=200)
-        if ohlcv:
-            from services.regime_detector import regime_detector, MarketRegime
-            regime = regime_detector.detect(ohlcv, symbol)
-            r = risk_engine.check_position_limit(
-                regime=regime, total_capital=10000,
-                current_position=0, new_amount=amount_usdt, strategy_position=0,
-            )
-            if not r.passed:
-                return False, r.reason
-        return True, ""
-    except Exception as e:
-        log.warning(f"RiskEngine check skipped: {e}")
-        return True, ""
 from db.database import async_session
 from db.models import Order, AuditLog, OrderType, OrderStatus, StrategyType
 
@@ -294,17 +274,38 @@ def _check_kill_switch(side: str = "") -> tuple[bool, str]:
 
 
 def _check_amount_limit(amount_usdt: float) -> tuple[bool, str]:
-    """基础金额校验（v2.1: 全局硬上限已移除，仅检查 >0）"""
+    """金额硬上限（v2.0: 恢复全局硬上限，单笔 ≤ MAX_ORDER_AMOUNT_USDT）"""
     if amount_usdt <= 0:
         return False, "Amount must be positive"
+    if amount_usdt > settings.MAX_ORDER_AMOUNT_USDT:
+        return False, (
+            f"单笔金额 {amount_usdt:.2f} USDT 超过硬上限 "
+            f"{settings.MAX_ORDER_AMOUNT_USDT:.2f} USDT"
+        )
     return True, ""
 
 
 def _check_symbol_whitelist(symbol: str) -> tuple[bool, str]:
-    """实盘模式交易对白名单校验（v2.1: 仅实盘生效，策略级白名单在 _enhanced_risk_check 中）"""
+    """实盘模式交易对白名单校验（仅实盘生效）"""
     if not settings.EXCHANGE_TESTNET and settings.LIVE_SYMBOL_WHITELIST:
         if symbol not in settings.LIVE_SYMBOL_WHITELIST:
             return False, f"实盘模式仅允许交易: {', '.join(settings.LIVE_SYMBOL_WHITELIST)}"
+    return True, ""
+
+
+async def _check_total_position_limit(new_amount_usdt: float) -> tuple[bool, str]:
+    """总持仓硬上限（v2.0 合约模式：sum(abs(notional)) ≤ MAX_TOTAL_POSITION_USDT）"""
+    try:
+        positions = await asyncio.to_thread(exmod.shared_exchange.fetch_positions)
+        total_notional = sum(abs(float(p.get("notional", 0) or 0)) for p in positions)
+    except Exception as e:
+        log.warning(f"Total position check skipped (fetch_positions failed): {e}")
+        return True, ""  # 无法获取持仓时不阻断，由 risk_engine 兜底
+    if total_notional + new_amount_usdt > settings.MAX_TOTAL_POSITION_USDT:
+        return False, (
+            f"总持仓 {total_notional:.2f} + 新增 {new_amount_usdt:.2f} USDT "
+            f"超过硬上限 {settings.MAX_TOTAL_POSITION_USDT:.2f} USDT"
+        )
     return True, ""
 
 
@@ -378,6 +379,20 @@ async def _enhanced_risk_check(user_id: str, symbol: str, side: str,
         ok, msg = _check_kill_switch("")
     if not ok:
         return False, msg
+
+    # ============================================================
+    # v2.0: 全局硬上限 + 实盘白名单（对非紧急来源生效）
+    # ============================================================
+    if source != "emergency":
+        ok_wl, msg_wl = _check_symbol_whitelist(symbol)
+        if not ok_wl:
+            return False, msg_wl
+        ok_amt, msg_amt = _check_amount_limit(amount_usdt)
+        if not ok_amt:
+            return False, msg_amt
+        ok_pos, msg_pos = await _check_total_position_limit(amount_usdt)
+        if not ok_pos:
+            return False, msg_pos
 
     # ============================================================
     # 手动交易

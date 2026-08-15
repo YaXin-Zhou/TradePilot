@@ -35,9 +35,9 @@
 > 目标：让「四层风控」和「审计/幂等」真正生效，而非死代码。
 
 ### 1.1 接回硬上限 + 白名单 + 风控
-- [ ] `_check_amount_limit` 恢复 `MAX_ORDER_AMOUNT_USDT` / `MAX_TOTAL_POSITION_USDT` 硬上限，并在 `place_market_order`/`place_limit_order` 入口强制调用
-- [ ] `_check_symbol_whitelist` 接入下单路径（实盘白名单）
-- [ ] 删除死代码 `_check_risk_engine`（或真正接入，异常时**默认拒绝**而非放行）
+- [x] `_check_amount_limit` 恢复 `MAX_ORDER_AMOUNT_USDT` / `MAX_TOTAL_POSITION_USDT` 硬上限，并在 `place_market_order`/`place_limit_order` 入口强制调用
+- [x] `_check_symbol_whitelist` 接入下单路径（实盘白名单）
+- [x] 删除死代码 `_check_risk_engine`（或真正接入，异常时**默认拒绝**而非放行）
 
 ### 1.2 幂等真正生效
 - [ ] 幂等键改为「秒级 + 随机分量」，通过 `clientOrderId` 传给 OKX
