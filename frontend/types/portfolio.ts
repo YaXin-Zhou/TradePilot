@@ -25,14 +25,17 @@ export interface BalanceEntry {
 /** 账户余额（按币种索引） */
 export type Balance = Record<string, BalanceEntry>;
 
-/** 持仓 */
+/** 合约持仓（v2.0 合约版：fetch_positions 口径） */
 export interface Position {
   symbol: string;
-  side: "long" | "short" | "none";
-  size: number;
-  entry_price?: number;
-  current_price?: number;
-  unrealized_pnl?: number;
+  side: "long" | "short";
+  contracts: number;
+  entry_price: number;
+  mark_price: number;
+  notional_usdt: number;
+  unrealized_pnl: number;
+  pnl_pct: number;
+  leverage: number;
 }
 
 /** 持仓概览 */

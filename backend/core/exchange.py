@@ -245,6 +245,41 @@ class ExchangeClient:
             self._mark_failure()
             raise ConnectionError(f"offline: {e}")
 
+    def fetch_positions(self, symbols: Optional[list[str]] = None) -> list[dict]:
+        """获取合约（swap）持仓 — v2.0 合约模式持仓真源。
+
+        返回归一化列表，仅保留 contracts != 0 的有效持仓：
+        [{symbol, side, contracts, entry_price, mark_price, unrealized_pnl, notional, leverage}]
+        失败返回空列表（上层据此判断无持仓/接口不可用）。
+        """
+        self._ensure_markets()
+        self._try_reconnect()
+        if not self._connected:
+            return []
+        try:
+            positions = self._exchange.fetch_positions(symbols)
+            self._mark_success()
+            result = []
+            for p in positions or []:
+                contracts = float(p.get("contracts") or 0)
+                if contracts == 0:
+                    continue
+                result.append({
+                    "symbol": p.get("symbol"),
+                    "side": p.get("side", ""),
+                    "contracts": contracts,
+                    "entry_price": float(p.get("entryPrice") or 0),
+                    "mark_price": float(p.get("markPrice") or 0),
+                    "unrealized_pnl": float(p.get("unrealizedPnl") or 0),
+                    "notional": float(p.get("notional") or 0),
+                    "leverage": float(p.get("leverage") or 0),
+                })
+            return result
+        except Exception as e:
+            self._mark_failure()
+            log.warning(f"fetch_positions failed: {e}")
+            return []
+
     def _to_price(self, symbol: str, price: float) -> float:
         self._ensure_markets()
         return float(self._exchange.price_to_precision(symbol, price))
@@ -275,10 +310,13 @@ class ExchangeClient:
             self._mark_failure()
             raise ExchangeError(f"下单失败: {e}")
 
-    def create_market_order(self, symbol: str, side: str, amount: float) -> Optional[dict]:
+    def create_market_order(self, symbol: str, side: str, amount: float,
+                            reduce_only: bool = False) -> Optional[dict]:
+        """下市价单。v2.0: 支持 reduce_only（合约平仓用，只减仓不开新仓）。"""
         self._ensure_markets()
         try:
-            order = self._exchange.create_market_order(symbol, side, amount)
+            params = {"reduceOnly": True} if reduce_only else None
+            order = self._exchange.create_market_order(symbol, side, amount, None, params)
             self._mark_success()
             return {
                 "id": order.get("id"),

@@ -1,4 +1,4 @@
-"""交易服务层 — Phase 8 实盘就绪版 (v2.0 合约版) (v2.0 合约版)
+"""交易服务层 — v2.0 合约版（只跑 OKX 永续 swap）
 
 核心改动：
   1. 移除所有 mock fallback（下单失败抛错，不再返回假单掩盖故障）
@@ -283,13 +283,13 @@ async def _get_total_capital() -> float:
 
 
 def _check_kill_switch(side: str = "") -> tuple[bool, str]:
-    """检查紧急停止状态
-    手动交易且为卖单时，紧急停止允许平仓（卖）但禁止开仓（买）。
+    """检查紧急停止状态。
+
+    v2.0（合约模式）：kill_switch 触发后禁止一切下单（含卖单）。
+    合约下裸卖单 = 开空，不能作为"平多"放行；平仓一律走 reduce-only（见 execute_emergency_stop）。
     """
     if kill_switch.is_triggered:
-        if side == "sell":
-            return True, ""  # 手动卖单：紧急停止允许平仓止损
-        return False, "KILL_SWITCH_TRIGGERED: 紧急停止已触发，开仓已冻结（卖单仍可平仓）。POST /api/trading/emergency-reset 解除"
+        return False, "KILL_SWITCH_TRIGGERED: 紧急停止已触发，所有开/平仓下单已冻结。POST /api/trading/emergency-reset 解除"
     return True, ""
 
 
@@ -691,10 +691,9 @@ async def execute_emergency_stop(by: str = "manual", reason: str = "") -> dict:
 
     results = {"cancelled_orders": 0, "closed_positions": 0, "stopped_strategies": 0}
 
-    # 1. 撤销所有挂单
+    # 1. 撤销所有挂单（v2.0: 直接调交易所，绕过 kill_switch 检查——否则撤单会被自身拦截）
     try:
-        n, _ = await cancel_all_orders("")
-        # 紧急停止时绕过 kill_switch 检查（已触发）
+        n = await asyncio.to_thread(exmod.shared_exchange.cancel_all_orders)
         results["cancelled_orders"] = n
         kill_switch.increment_cancelled(n)
         kill_switch.record_action(f"cancelled {n} orders")
@@ -702,24 +701,27 @@ async def execute_emergency_stop(by: str = "manual", reason: str = "") -> dict:
         log.error(f"Emergency: cancel orders failed: {e}")
         kill_switch.record_action(f"cancel orders failed: {e}")
 
-    # 2. 市价平掉所有持仓
+    # 2. 市价平掉所有合约持仓（v2.0: 用 fetch_positions，reduce-only 平仓）
     try:
-        bal = await asyncio.to_thread(exmod.shared_exchange.fetch_balance)
+        positions = await asyncio.to_thread(exmod.shared_exchange.fetch_positions)
         closed = 0
-        for cur, info in bal.items():
-            if cur in ("USDT", "USD", "USDC"):
+        for p in positions:
+            symbol = p.get("symbol") or ""
+            side = p.get("side", "")
+            contracts = float(p.get("contracts", 0) or 0)
+            if not symbol or contracts <= 0:
                 continue
-            total = float(info.get("total", 0) or 0)
-            if total > 0:
-                symbol = f"{cur}/USDT"
-                try:
-                    await asyncio.to_thread(
-                        exmod.shared_exchange.create_market_order, symbol, "sell", total
-                    )
-                    closed += 1
-                    log.warning(f"Emergency: closed {total} {cur} via {symbol}")
-                except Exception as e:
-                    log.error(f"Emergency: failed to close {cur}: {e}")
+            # 平多→卖、平空→买，均 reduce_only，避免反向开仓
+            close_side = "sell" if side == "long" else "buy"
+            try:
+                await asyncio.to_thread(
+                    exmod.shared_exchange.create_market_order,
+                    symbol, close_side, contracts, True,
+                )
+                closed += 1
+                log.warning(f"Emergency: closed {contracts} contracts of {symbol} ({side})")
+            except Exception as e:
+                log.error(f"Emergency: failed to close {symbol} ({side}): {e}")
         results["closed_positions"] = closed
         kill_switch.increment_closed(closed)
         kill_switch.record_action(f"closed {closed} positions")

@@ -175,8 +175,8 @@ class SafeJSONResponse(_JSONResponse):
 
 app = FastAPI(
     title="AI Quant Trade",
-    description="AI 量化交易系统 - OKX",
-    version="1.1.0",
+    description="AI 量化交易系统 - OKX 合约（永续 swap）",
+    version="2.0.0",
     lifespan=lifespan,
     default_response_class=SafeJSONResponse,
 )
@@ -228,7 +228,7 @@ async def health():
         "trade_mode": settings.EXCHANGE_TRADE_MODE,
         "testnet": settings.EXCHANGE_TESTNET,
         "kill_switch": kill_switch.get_state()["status"],
-        "version": "1.2.0",
+        "version": "2.0.0",
     }
 
 

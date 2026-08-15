@@ -6,26 +6,23 @@ import {
   ArrowUp, ArrowDown, Minus, X,
 } from "lucide-react";
 
+// v2.0 合约版：持仓字段与后端 /api/portfolio/positions 对齐（fetch_positions 口径）
 interface PositionItem {
   symbol: string;
-  asset: string;
-  quantity: number;
-  current_price: number;
-  value_usdt: number;
-  avg_buy_price: number | null;
-  total_buy_cost: number | null;
-  unrealized_pnl: number | null;
-  pnl_pct: number | null;
-  change_24h_pct: number;
-  realized_pnl: number;
+  side: "long" | "short";
+  contracts: number;
+  entry_price: number;
+  mark_price: number;
+  notional_usdt: number;
+  unrealized_pnl: number;
+  pnl_pct: number;
+  leverage: number;
 }
 
 interface PositionsData {
   positions: PositionItem[];
-  total_value_usdt: number;
-  total_buy_cost: number;
+  total_notional_usdt: number;
   total_unrealized_pnl: number;
-  total_pnl_pct: number;
   count: number;
 }
 
@@ -69,22 +66,23 @@ function PnlArrow({ pnl }: { pnl: number | null | undefined }) {
 }
 
 export default function PositionsPage() {
-  const { t, lang } = useLanguage();
+  const { lang } = useLanguage();
   const [data, setData] = useState<PositionsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshInterval] = useState(3000); // 3s 实时刷新
   const [flashPnl, setFlashPnl] = useState<"up" | "down" | null>(null);
   const prevPnlRef = useRef<number | null>(null);
-  const [closing, setClosing] = useState<string | null>(null);  // 正在平仓的币种
+  const [closing, setClosing] = useState<string | null>(null);  // 正在平仓的交易对
 
-  const handleClose = async (asset: string, quantity: number) => {
+  const handleClose = async (symbol: string, side: string, contracts: number) => {
+    const asset = symbol.split("/")[0];
     const ok = window.confirm(
       isZh
-        ? `确认市价平仓 ${asset}？\n\n数量：${quantity.toFixed(6)} ${asset}\n将以当前市价卖出全部持仓。`
-        : `Confirm market close ${asset}?\n\nQty: ${quantity.toFixed(6)} ${asset}\nWill sell all at current market price.`
+        ? `确认市价平仓 ${symbol}（${side === "long" ? "多" : "空"}）？\n\n张数：${contracts} 张\n将以 reduce-only 市价单平仓。`
+        : `Confirm market close ${symbol} (${side})?\n\nContracts: ${contracts}\nWill close with a reduce-only market order.`
     );
     if (!ok) return;
-    setClosing(asset);
+    setClosing(symbol);
     try {
       await api.closePosition(asset, true);
       load(); // 刷新数据
@@ -127,9 +125,10 @@ export default function PositionsPage() {
   const isZh = lang === "zh";
   const p = data;
   const pnl = p?.total_unrealized_pnl ?? 0;
-  const pnlPct = p?.total_pnl_pct ?? 0;
-  const buyCost = p?.total_buy_cost ?? 0;
-  const curValue = p?.total_value_usdt ?? 0;
+  const notional = p?.total_notional_usdt ?? 0;
+  // 开仓成本名义 = 当前名义 - 未实现盈亏
+  const costBasis = notional - pnl;
+  const pnlPct = costBasis > 0 ? (pnl / costBasis) * 100 : 0;
 
   return (
     <div className="space-y-4">
@@ -139,7 +138,7 @@ export default function PositionsPage() {
         style={{ background: pnlBg(pnl) }}
       >
         <p className="text-xs text-dark-400 mb-1">
-          {isZh ? "浮动盈亏 · 实时" : "Unrealized PnL · Realtime"}
+          {isZh ? "合约浮动盈亏 · 实时" : "Unrealized PnL · Realtime"}
         </p>
         <div className="flex items-center justify-center gap-3">
           <PnlArrow pnl={pnl} />
@@ -158,35 +157,11 @@ export default function PositionsPage() {
           </span>
         </div>
 
-        {/* 成本 vs 市值对比条 */}
-        {buyCost > 0 && (
-          <div className="mt-4 max-w-md mx-auto">
-            <div className="flex justify-between text-xs text-dark-400 mb-1">
-              <span>{isZh ? "投入成本" : "Cost"}: ${buyCost.toLocaleString()}</span>
-              <span>{isZh ? "当前市值" : "Value"}: ${curValue.toLocaleString()}</span>
-            </div>
-            <div className="h-2 bg-dark-700 rounded-full overflow-hidden flex">
-              <div
-                className="h-full transition-all duration-500"
-                style={{
-                  width: `${Math.min(buyCost / Math.max(curValue, 1) * 100, 100)}%`,
-                  background: curValue >= buyCost
-                    ? "linear-gradient(90deg, #34d399, #fbbf24)"
-                    : "linear-gradient(90deg, #f87171, #34d399)",
-                }}
-              />
-              {curValue > 0 && (
-                <div
-                  className="h-full transition-all duration-500"
-                  style={{
-                    width: `${Math.abs(pnl) / Math.max(curValue, 1) * 100}%`,
-                    backgroundColor: pnl >= 0 ? "rgba(52,211,153,0.3)" : "rgba(248,113,113,0.3)",
-                  }}
-                />
-              )}
-            </div>
-          </div>
-        )}
+        {/* 名义价值概览条 */}
+        <div className="mt-4 max-w-md mx-auto flex justify-between text-xs text-dark-400">
+          <span>{isZh ? "开仓名义" : "Entry Notional"}: ${costBasis.toLocaleString()}</span>
+          <span>{isZh ? "当前名义" : "Mark Notional"}: ${notional.toLocaleString()}</span>
+        </div>
       </div>
 
       {/* ===== 刷新状态 ===== */}
@@ -198,7 +173,7 @@ export default function PositionsPage() {
           <span>
             {isZh ? `${p?.count ?? 0} 个持仓` : `${p?.count ?? 0} positions`}
           </span>
-          <span className="text-dark-600 text-[10px] ml-2 px-1.5 py-0.5 border border-dark-700 rounded">build 20260722</span>
+          <span className="text-dark-600 text-[10px] ml-2 px-1.5 py-0.5 border border-dark-700 rounded">v2.0.0 合约版</span>
         </div>
         <button
           onClick={load}
@@ -221,82 +196,87 @@ export default function PositionsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-dark-800 text-dark-400 text-xs">
-                <th className="text-left py-2.5 px-3 font-medium">{isZh ? "币种" : "Asset"}</th>
-                <th className="text-right py-2.5 px-3 font-medium">{isZh ? "数量" : "Qty"}</th>
-                <th className="text-right py-2.5 px-3 font-medium hidden sm:table-cell">{isZh ? "买入均价" : "Avg Buy"}</th>
-                <th className="text-right py-2.5 px-3 font-medium">{isZh ? "现价" : "Now"}</th>
-                <th className="text-right py-2.5 px-3 font-medium hidden md:table-cell">{isZh ? "投入" : "Cost"}</th>
-                <th className="text-right py-2.5 px-3 font-medium hidden md:table-cell">{isZh ? "市值" : "Value"}</th>
+                <th className="text-left py-2.5 px-3 font-medium">{isZh ? "合约" : "Symbol"}</th>
+                <th className="text-left py-2.5 px-3 font-medium">{isZh ? "方向" : "Side"}</th>
+                <th className="text-right py-2.5 px-3 font-medium">{isZh ? "张数" : "Contracts"}</th>
+                <th className="text-right py-2.5 px-3 font-medium hidden sm:table-cell">{isZh ? "开仓价" : "Entry"}</th>
+                <th className="text-right py-2.5 px-3 font-medium">{isZh ? "标记价" : "Mark"}</th>
+                <th className="text-right py-2.5 px-3 font-medium hidden md:table-cell">{isZh ? "名义" : "Notional"}</th>
                 <th className="text-right py-2.5 px-3 font-medium">{isZh ? "盈亏" : "PnL"}</th>
                 <th className="text-center py-2.5 px-3 font-medium">{isZh ? "操作" : "Action"}</th>
               </tr>
             </thead>
             <tbody>
               {p.positions.map((pos) => {
-                const hasPnl = pos.unrealized_pnl !== null;
                 const pnl = pos.unrealized_pnl ?? 0;
                 const pnlP = pos.pnl_pct ?? 0;
+                const asset = pos.symbol.split("/")[0];
                 return (
                   <tr
-                    key={pos.symbol}
+                    key={pos.symbol + pos.side}
                     className="border-b border-dark-800 hover:bg-dark-850 transition-colors"
-                    style={{ background: hasPnl ? pnlBg(pnl) : undefined }}
+                    style={{ background: pnlBg(pnl) }}
                   >
                     <td className="py-2.5 px-3">
                       <div className="flex items-center gap-2">
                         <div
                           className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold"
                           style={{
-                            background: `hsl(${(pos.asset.charCodeAt(0) || 0) * 137 % 360}, 60%, 30%)`,
+                            background: `hsl(${(asset.charCodeAt(0) || 0) * 137 % 360}, 60%, 30%)`,
                             color: "#fff",
                           }}
                         >
-                          {pos.asset[0]}
+                          {asset[0]}
                         </div>
-                        <span className="text-white font-medium">{pos.asset}</span>
+                        <span className="text-white font-medium">{asset}</span>
+                        <span className="text-dark-500 text-[10px]">{pos.leverage}x</span>
                       </div>
                     </td>
+                    <td className="py-2.5 px-3">
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                          pos.side === "long"
+                            ? "bg-green-500/20 text-green-400"
+                            : "bg-red-500/20 text-red-400"
+                        }`}
+                      >
+                        {pos.side === "long" ? (isZh ? "多" : "LONG") : (isZh ? "空" : "SHORT")}
+                      </span>
+                    </td>
                     <td className="py-2.5 px-3 text-right font-mono text-white text-xs">
-                      {pos.quantity.toFixed(pos.quantity >= 1 ? 4 : 6)}
+                      {pos.contracts.toLocaleString("en-US", { maximumFractionDigits: 6 })}
                     </td>
                     <td className="py-2.5 px-3 text-right font-mono text-dark-300 text-xs hidden sm:table-cell">
-                      {pos.avg_buy_price !== null ? `$${pos.avg_buy_price.toFixed(2)}` : "—"}
+                      ${pos.entry_price.toFixed(6)}
                     </td>
                     <td className="py-2.5 px-3 text-right font-mono text-white text-xs">
-                      ${pos.current_price.toFixed(2)}
-                    </td>
-                    <td className="py-2.5 px-3 text-right font-mono text-dark-300 text-xs hidden md:table-cell">
-                      {pos.total_buy_cost !== null ? `$${pos.total_buy_cost.toFixed(2)}` : "—"}
+                      ${pos.mark_price.toFixed(6)}
                     </td>
                     <td className="py-2.5 px-3 text-right font-mono text-white text-xs hidden md:table-cell">
-                      ${pos.value_usdt.toFixed(2)}
+                      ${pos.notional_usdt.toFixed(2)}
                     </td>
                     <td className="py-2.5 px-3 text-right">
-                      {hasPnl ? (
-                        <div className="flex flex-col items-end">
-                          <span className="font-mono font-bold text-xs" style={{ color: pnlColor(pnl) }}>
-                            {fmt$(pnl)}
-                          </span>
-                          <span className="text-[10px]" style={{ color: pnlColor(pnl) }}>
-                            {pnlSign(pnlP)}{Math.abs(pnlP).toFixed(2)}%
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-dark-500 text-xs">—</span>
-                      )}
+                      <div className="flex flex-col items-end">
+                        <span className="font-mono font-bold text-xs" style={{ color: pnlColor(pnl) }}>
+                          {fmt$(pnl)}
+                        </span>
+                        <span className="text-[10px]" style={{ color: pnlColor(pnl) }}>
+                          {pnlSign(pnlP)}{Math.abs(pnlP).toFixed(2)}%
+                        </span>
+                      </div>
                     </td>
                     <td className="py-2.5 px-3 text-center">
                       <button
-                        onClick={() => handleClose(pos.asset, pos.quantity)}
-                        disabled={closing === pos.asset}
+                        onClick={() => handleClose(pos.symbol, pos.side, pos.contracts)}
+                        disabled={closing === pos.symbol}
                         className="px-3 py-1.5 rounded text-xs font-bold transition-all duration-200
                           bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white
                           border border-red-500/40 hover:border-red-500
                           disabled:opacity-50 disabled:cursor-not-allowed
                           shadow-sm hover:shadow-md active:scale-95"
-                        title={isZh ? "市价平仓" : "Close at Market"}
+                        title={isZh ? "reduce-only 市价平仓" : "Reduce-only close at market"}
                       >
-                        {closing === pos.asset ? (
+                        {closing === pos.symbol ? (
                           <RefreshCw size={13} className="animate-spin inline" />
                         ) : (
                           <X size={13} className="inline" />
@@ -315,14 +295,12 @@ export default function PositionsPage() {
                 <td className="py-2.5 px-3 text-xs text-dark-400 font-medium">
                   {isZh ? "合计" : "Total"}
                 </td>
-                <td className="py-2.5 px-3 text-right text-xs text-dark-400" />
+                <td className="py-2.5 px-3" />
+                <td className="py-2.5 px-3" />
                 <td className="py-2.5 px-3 hidden sm:table-cell" />
                 <td className="py-2.5 px-3 hidden md:table-cell" />
-                <td className="py-2.5 px-3 text-right font-mono text-dark-300 text-xs hidden md:table-cell">
-                  ${buyCost.toFixed(2)}
-                </td>
                 <td className="py-2.5 px-3 text-right font-mono text-white text-xs hidden md:table-cell">
-                  ${curValue.toFixed(2)}
+                  ${notional.toFixed(2)}
                 </td>
                 <td className="py-2.5 px-3 text-right font-mono font-bold text-xs" style={{ color: pnlColor(pnl) }}>
                   {fmt$(pnl)} ({pnlSign(pnlPct)}{Math.abs(pnlPct).toFixed(2)}%)

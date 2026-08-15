@@ -1,4 +1,5 @@
 """投资组合 API — 薄层：参数校验 → 调用 service → 构造响应"""
+import asyncio
 from fastapi import APIRouter, Query, Depends
 from pydantic import BaseModel
 
@@ -7,7 +8,6 @@ from services.portfolio_service import (
     get_positions, get_realtime_assets,
 )
 from services.portfolio_allocator import portfolio_allocator
-from services.trading_service import place_market_order
 import core.exchange as exmod
 from core.logger import log
 from auth.deps import get_current_user
@@ -32,7 +32,7 @@ async def performance():
 
 @router.get("/positions")
 async def positions():
-    """获取当前持仓列表（现货模式：非 USDT 币种余额，含浮动盈亏）"""
+    """获取当前合约持仓列表（v2.0 合约模式：多头/空头双向持仓）"""
     return await get_positions()
 
 
@@ -53,48 +53,57 @@ class ClosePositionRequest(BaseModel):
 
 @router.post("/close")
 async def close_position(req: ClosePositionRequest, _user: dict = Depends(get_current_user)):
-    """市价平仓：对指定币种的现货持仓下达市价卖单。
+    """市价平仓（v2.0 合约模式）：对指定交易对的合约持仓下达 reduce-only 市价单。
 
-    自动获取当前持仓数量，以市价单全部卖出。
+    自动判断持仓方向（多→卖、空→买），reduce-only 确保只平仓不开新仓。
     需 confirm=true 确认执行。
     """
     if not req.confirm:
         return {"success": False, "error": "需 confirm=true 确认平仓操作"}
 
     asset = req.asset.upper()
-    symbol = f"{asset}/USDT"
 
-    # 获取当前持仓数量
+    # 从合约持仓中定位该交易对
     try:
-        balance = exmod.shared_exchange.fetch_balance()
-        qty = float(balance.get(asset, {}).get("total", 0) or 0)
-        if qty <= 0:
-            return {"success": False, "error": f"无 {asset} 持仓"}
+        positions = await asyncio.to_thread(exmod.shared_exchange.fetch_positions)
     except Exception as e:
-        log.error(f"ClosePosition: fetch_balance failed for {asset}: {e}")
+        log.error(f"ClosePosition: fetch_positions failed: {e}")
         return {"success": False, "error": f"获取持仓失败: {e}"}
 
-    # 下达市价卖单
-    order, error, _ = await place_market_order(
-        user_id=_user.get("id", "system"),
-        symbol=symbol,
-        side="sell",
-        amount=qty,
-        confirm_live=False,
-        account_id="default",
-        source="manual",
-    )
-    if error:
-        return {"success": False, "error": f"平仓失败: {error}"}
+    target = None
+    for p in positions:
+        if asset in (p.get("symbol") or ""):
+            target = p
+            break
+    if target is None:
+        return {"success": False, "error": f"无 {asset} 合约持仓"}
 
-    log.info(f"ClosePosition: {asset} x{qty} sold at market, order={order.get('id') if order else 'N/A'}")
+    symbol = target.get("symbol") or f"{asset}/USDT"
+    side = target.get("side", "")
+    contracts = float(target.get("contracts", 0) or 0)
+    if contracts <= 0:
+        return {"success": False, "error": f"无 {asset} 合约持仓"}
+
+    # 平多→卖、平空→买，均 reduce-only
+    close_side = "sell" if side == "long" else "buy"
+    try:
+        order = await asyncio.to_thread(
+            exmod.shared_exchange.create_market_order, symbol, close_side, contracts, True
+        )
+    except Exception as e:
+        log.error(f"ClosePosition: close failed for {symbol}: {e}")
+        return {"success": False, "error": f"平仓失败: {e}"}
+
+    log.info(f"ClosePosition: {symbol} ({side}) x{contracts} contracts closed reduce-only, "
+             f"order={order.get('id') if order else 'N/A'}")
 
     return {
         "success": True,
         "data": {
             "asset": asset,
             "symbol": symbol,
-            "quantity": qty,
+            "side": side,
+            "contracts": contracts,
             "order": order,
         },
     }

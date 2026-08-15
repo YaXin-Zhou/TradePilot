@@ -524,7 +524,7 @@ class StrategyRunner:
             if result.triggered:
                 log.warning(f"StrategyRunner[{sid}] stop loss: {result.message}")
                 log_event(sid, "stop_loss", f"Stop loss triggered: {result.message}", {
-                    "price": current_price, "stop_price": sm.config.stop_price,
+                    "price": current_price, "stop_price": result.stop_price,
                 })
                 await self._close_position(sid, obj.symbol, sm.side)
                 return

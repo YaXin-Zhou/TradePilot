@@ -247,7 +247,7 @@ def _verify_api_key_permissions(api_key: str, secret: str, passphrase: str, test
             "password": passphrase if passphrase else None,
             "enableRateLimit": True,
             "timeout": 15000,
-            "options": {"defaultType": "spot"},
+            "options": {"defaultType": "swap"},  # v2.0: 只跑合约，校验用 swap 权限
         })
         proxy = global_settings.HTTPS_PROXY or global_settings.HTTP_PROXY
         if proxy:

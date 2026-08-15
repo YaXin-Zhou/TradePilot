@@ -27,6 +27,14 @@ class Settings:
     EXCHANGE_PASSPHRASE: str = os.getenv("EXCHANGE_PASSPHRASE", "")
     EXCHANGE_TESTNET: bool = os.getenv("EXCHANGE_TESTNET", "true").lower() == "true"
 
+    @property
+    def EXCHANGE_TRADE_MODE(self) -> str:
+        """交易模式标签：TESTNET（模拟盘）/ LIVE（实盘）。
+
+        v2.0: 健康检查端点引用此属性，此前缺失导致 /api/health 抛 AttributeError。
+        """
+        return "TESTNET" if self.EXCHANGE_TESTNET else "LIVE"
+
     # 默认交易对
     DEFAULT_SYMBOL: str = os.getenv("DEFAULT_SYMBOL", "BTC/USDT")
 

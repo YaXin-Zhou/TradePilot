@@ -49,17 +49,19 @@ async def reconcile(reporter: ReconcileResult | None = None) -> ReconcileResult:
         reporter.add_issue(f"Exchange offline: {msg}")
         return reporter
 
-    # 2. 拉取交易所余额（现货模式：余额即"持仓"）
-    SYMBOLS = ["BTC", "ETH", "SOL", "USDT"]
+    # 2. 拉取交易所合约持仓（v2.0 合约模式：fetch_positions 为真源）
     try:
-        for coin in SYMBOLS:
-            balance = shared_exchange.fetch_balance(coin)
-            if balance and balance.get("free", 0) > 0:
-                reporter.exchange_positions[coin] = balance
+        positions = shared_exchange.fetch_positions()
+        for p in positions:
+            sym = p.get("symbol") or ""
+            if not sym:
+                continue
+            coin = sym.split("/")[0]
+            reporter.exchange_positions[coin] = p
     except Exception as e:
-        reporter.add_issue(f"Fetch balance failed: {e}")
+        reporter.add_issue(f"Fetch positions failed: {e}")
 
-    # 3. 对账: DB positions vs 交易所余额
+    # 3. 对账: DB positions vs 交易所合约持仓
     try:
         from db.database import async_session
         from db.models import Position
@@ -69,26 +71,21 @@ async def reconcile(reporter: ReconcileResult | None = None) -> ReconcileResult:
             db_positions = (await session.execute(select(Position))).scalars().all()
             db_by_symbol = {p.symbol.split("/")[0]: p for p in db_positions}
 
-            # 交易所有余额但 DB 无记录
-            for coin, bal in reporter.exchange_positions.items():
-                if coin == "USDT":
-                    continue
+            # 交易所有合约持仓但 DB 无记录
+            for coin, pos in reporter.exchange_positions.items():
                 if coin not in db_by_symbol:
                     reporter.add_issue(
-                        f"Balance in exchange but NOT in DB: {coin} "
-                        f"free={bal.get('free',0)} total={bal.get('total',0)}"
+                        f"Contract position in exchange but NOT in DB: {coin} "
+                        f"contracts={pos.get('contracts', 0)} side={pos.get('side', '')}"
                     )
 
-            # DB 有持仓但交易所余额不足
+            # DB 有持仓但交易所无对应合约持仓
             for p in db_positions:
                 coin = p.symbol.split("/")[0]
-                if coin in reporter.exchange_positions:
-                    ex_free = reporter.exchange_positions[coin].get("free", 0)
-                    if abs(p.quantity - ex_free) > 1e-8 and p.quantity > 0:
-                        reporter.add_issue(
-                            f"Quantity mismatch for {p.symbol}: "
-                            f"DB={p.quantity} exchange={ex_free}"
-                        )
+                if coin not in reporter.exchange_positions and p.quantity > 0:
+                    reporter.add_issue(
+                        f"Position in DB but NOT in exchange: {p.symbol} qty={p.quantity}"
+                    )
 
     except Exception as e:
         reporter.add_issue(f"DB position comparison failed: {e}")

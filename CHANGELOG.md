@@ -5,6 +5,27 @@
 
 ---
 
+## [2.0.0] — 2026-07-21 — 合约版（只跑 OKX 永续 swap）
+
+> 从「现货/合约语义混用」统一为「只跑合约」，并修复阻断实盘与运行的关键缺陷。
+> 完整路线图见 `MILESTONES_V2.md`。
+
+### Changed — 现货 → 合约统一
+- `core/exchange.py`：新增 `fetch_positions()`（合约持仓真源）；`create_market_order` 支持 `reduce_only`（只减仓不开新仓）
+- `services/portfolio_service.py`：`get_positions()`/`get_realtime_assets()` 改为合约口径（双向持仓、名义价值、未实现盈亏、杠杆），不再用「非 USDT 余额」冒充持仓
+- `api/portfolio.py`：平仓改为 reduce-only（多→卖、空→买）
+- `services/trading_service.py`：紧急停止平仓改用 `fetch_positions` + reduce-only
+- `api/settings.py`：API Key 权限校验 `defaultType` 由 spot → swap
+- `scripts/reconcile.py`：对账改用合约持仓
+
+### Fixed — 阻断性 P0
+- `config.py`：新增 `EXCHANGE_TRADE_MODE` 属性（此前缺失导致 `/api/health` 抛 `AttributeError`→500，Docker 健康检查永远失败、`depends_on` 链无法放行）
+- `strategies/runner.py:527`：`sm.config.stop_price` → `result.stop_price`（止损触发时的 `AttributeError` 导致永不平仓、策略每 5 秒崩溃）
+- `services/trading_service.py`：紧急停止撤单绕过 kill_switch 检查（此前先 `trigger()` 再撤单被自身拦截，`cancelled_orders` 恒 0）
+- `services/trading_service.py`：kill_switch 触发后不再放行「卖单」（合约下裸卖=开空，原逻辑可绕过冻结）
+
+---
+
 ## [Unreleased] — Production v1.1（优化版里程碑 N1-N6）
 
 ### Added

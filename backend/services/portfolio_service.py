@@ -141,130 +141,77 @@ async def _get_avg_buy_cost(symbols: list[str]) -> dict[str, dict]:
 
 
 async def get_positions() -> dict:
-    """获取当前持仓列表（现货模式：非 USDT 币种余额 = 持仓）。
+    """获取当前合约持仓列表（v2.0 合约模式：fetch_positions 为真源）。
 
-    v1.2: 增加浮动盈亏计算 — 从 DB orders 表获取平均买入成本，
-    结合实时价格计算未实现盈亏（USDT + 百分比）。
-
-    FIX: ExchangeClient.fetch_balance() 返回 {currency: {free, used, total}} 格式，
-    无顶层 "total" 键。原代码 balance.get("total", {}) 永远返回空 dict → 持仓列表恒空。
+    返回多头/空头双向持仓，含开仓均价、标记价、未实现盈亏、名义价值、杠杆。
+    合约持仓与现货余额解耦——不再用"非 USDT 余额"冒充持仓。
     """
     try:
         _exchange = _get_exchange()
-        balance = _exchange.fetch_balance()
+        positions = _exchange.fetch_positions()
     except Exception as e:
         log.warning(f"Positions: exchange fetch failed: {e}")
         return {"success": False, "error": f"交易所连接失败: {e}", "data": []}
 
-    # 先收集持仓币种列表
-    hold_symbols = []
-    for asset, info in balance.items():
-        if asset == "USDT" or not isinstance(info, dict):
-            continue
-        qty = float(info.get("total", 0) or 0)
-        if qty > 0:
-            hold_symbols.append(f"{asset}/USDT")
-
-    # 从交易所+DB获取平均买入成本
-    cost_map = await _get_avg_buy_cost(hold_symbols)
-
-    log.info(f"Positions: raw balance keys={list(balance.keys())[:10]}, "
-             f"total_items={len(balance)}, cost_map={len(cost_map)} symbols")
-
-    positions = []
-    total_value = 0.0
+    result_positions = []
+    total_notional = 0.0
     total_unrealized_pnl = 0.0
-    total_buy_cost = 0.0
 
-    # ExchangeClient.fetch_balance() 返回 {currency: {free, used, total}}
-    for asset, info in balance.items():
-        if asset == "USDT":
+    for p in positions:
+        contracts = float(p.get("contracts", 0) or 0)
+        if contracts <= 0:
             continue
-        if not isinstance(info, dict):
-            continue
-        qty = float(info.get("total", 0) or 0)
-        if qty <= 0:
-            continue
-        symbol = f"{asset}/USDT"
+        symbol = p.get("symbol") or ""
+        side = p.get("side", "")
+        entry_price = float(p.get("entry_price", 0) or 0)
+        mark_price = float(p.get("mark_price", 0) or 0)
+        unrealized_pnl = float(p.get("unrealized_pnl", 0) or 0)
+        notional = abs(float(p.get("notional", 0) or 0))
+        leverage = float(p.get("leverage", 0) or 0)
 
-        # Ticker 获取（带重试）
-        price = 0
-        change_pct = 0
-        for attempt in range(3):
-            try:
-                ticker = _exchange.fetch_ticker(symbol)
-                price = ticker.get("last", 0)
-                change_pct = ticker.get("change_pct", 0)
-                if price > 0:
-                    break
-            except Exception as e:
-                log.warning(f"Positions: fetch_ticker({symbol}) attempt {attempt+1} failed: {e}")
-                import time as _t
-                _t.sleep(0.5)
+        total_notional += notional
+        total_unrealized_pnl += unrealized_pnl
+        cost = notional - unrealized_pnl
+        pnl_pct = (unrealized_pnl / cost * 100) if cost > 0 else 0.0
 
-        if price == 0:
-            log.error(f"Positions: fetch_ticker({symbol}) failed after 3 retries, price=0")
-
-        value = qty * price
-        total_value += value
-
-        # 浮动盈亏计算
-        cost_entry = cost_map.get(symbol, {})
-        avg_price = cost_entry.get("avg_price")
-        unrealized_pnl = None
-        pnl_pct = None
-        buy_cost = None
-        if avg_price and avg_price > 0 and price > 0:
-            buy_cost = round(avg_price * qty, 2)
-            total_buy_cost += buy_cost
-            unrealized_pnl = (price - avg_price) * qty
-            pnl_pct = ((price - avg_price) / avg_price) * 100
-            total_unrealized_pnl += unrealized_pnl
-
-        positions.append({
+        result_positions.append({
             "symbol": symbol,
-            "asset": asset,
-            "quantity": round(qty, 6),
-            "current_price": round(price, 2),
-            "value_usdt": round(value, 2),
-            "avg_buy_price": round(avg_price, 2) if avg_price else None,
-            "total_buy_cost": buy_cost,
-            "unrealized_pnl": round(unrealized_pnl, 2) if unrealized_pnl is not None else None,
-            "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
-            "change_24h_pct": round(change_pct, 2) if change_pct else 0,
-            "realized_pnl": round(cost_entry.get("realized_pnl", 0), 2),
+            "side": side,
+            "contracts": round(contracts, 6),
+            "entry_price": round(entry_price, 6),
+            "mark_price": round(mark_price, 6),
+            "notional_usdt": round(notional, 2),
+            "unrealized_pnl": round(unrealized_pnl, 2),
+            "pnl_pct": round(pnl_pct, 2),
+            "leverage": leverage,
         })
 
-    # 按价值降序排列
-    positions.sort(key=lambda p: p["value_usdt"], reverse=True)
+    result_positions.sort(key=lambda p: p["notional_usdt"], reverse=True)
 
-    total_pnl_pct = (total_unrealized_pnl / total_buy_cost * 100) if total_buy_cost > 0 else 0
-
-    log.info(f"Positions: found {len(positions)} positions, "
-             f"total_value={total_value:.2f} USDT, "
+    log.info(f"Positions: found {len(result_positions)} contract positions, "
+             f"total_notional={total_notional:.2f} USDT, "
              f"unrealized_pnl={total_unrealized_pnl:.2f} USDT")
 
     return {
         "success": True,
         "data": {
-            "positions": positions,
-            "total_value_usdt": round(total_value, 2),
-            "total_buy_cost": round(total_buy_cost, 2),
+            "positions": result_positions,
+            "total_notional_usdt": round(total_notional, 2),
             "total_unrealized_pnl": round(total_unrealized_pnl, 2),
-            "total_pnl_pct": round(total_pnl_pct, 2),
-            "count": len(positions),
+            "count": len(result_positions),
         },
     }
 
 
 async def get_realtime_assets() -> dict:
-    """获取实时资金概览 — 总资产/浮动盈亏/24h变化/可用余额。
+    """获取实时资金概览（v2.0 合约模式：账户权益 + 合约持仓未实现盈亏）。
 
-    用于前端实时资金变化展示，聚合余额 + 持仓 + 盈亏。
+    用于前端实时资金变化展示，聚合 USDT 权益 + 合约持仓盈亏。
     """
     try:
         _exchange = _get_exchange()
         balance = _exchange.fetch_balance()
+        positions = _exchange.fetch_positions()
     except Exception as e:
         log.warning(f"RealtimeAssets: exchange fetch failed: {e}")
         return {"success": False, "error": f"交易所连接失败: {e}", "data": None}
@@ -274,79 +221,33 @@ async def get_realtime_assets() -> dict:
     usdt_used = float(usdt_info.get("used", 0) or 0)
     usdt_total = float(usdt_info.get("total", 0) or 0)
 
-    # 先收集持仓币种列表
-    hold_symbols = []
-    for asset, info in balance.items():
-        if asset == "USDT" or not isinstance(info, dict):
-            continue
-        qty = float(info.get("total", 0) or 0)
-        if qty > 0:
-            hold_symbols.append(f"{asset}/USDT")
-
-    # 从交易所+DB获取平均买入成本
-    cost_map = await _get_avg_buy_cost(hold_symbols)
-
-    positions_value = 0.0
     total_unrealized_pnl = 0.0
-    total_cost = 0.0
-    weighted_24h_change = 0.0
+    positions_notional = 0.0
+    for p in positions:
+        total_unrealized_pnl += float(p.get("unrealized_pnl", 0) or 0)
+        positions_notional += abs(float(p.get("notional", 0) or 0))
 
-    for asset, info in balance.items():
-        if asset == "USDT" or not isinstance(info, dict):
-            continue
-        qty = float(info.get("total", 0) or 0)
-        if qty <= 0:
-            continue
-        symbol = f"{asset}/USDT"
-
-        # Ticker 获取（带重试）
-        price = 0
-        change_pct = 0
-        for attempt in range(3):
-            try:
-                ticker = _exchange.fetch_ticker(symbol)
-                price = ticker.get("last", 0)
-                change_pct = ticker.get("change_pct", 0)
-                if price > 0:
-                    break
-            except Exception as e:
-                log.warning(f"RealtimeAssets: fetch_ticker({symbol}) attempt {attempt+1} failed: {e}")
-                import time as _t
-                _t.sleep(0.5)
-
-        value = qty * price
-        positions_value += value
-
-        # 24h 加权变化（按持仓价值加权）
-        if positions_value > 0:
-            weighted_24h_change += value * (change_pct or 0)
-
-        # 浮动盈亏
-        cost_entry = cost_map.get(symbol, {})
-        avg_price = cost_entry.get("avg_price")
-        if avg_price and avg_price > 0:
-            total_unrealized_pnl += (price - avg_price) * qty
-            total_cost += avg_price * qty
-
-    total_assets = usdt_total + positions_value
-    total_pnl_pct = (total_unrealized_pnl / total_cost * 100) if total_cost > 0 else 0
+    # 合约账户权益 = USDT 总余额（已含未实现盈亏）；持仓名义价值仅作展示
+    total_assets = usdt_total
+    cost_basis = total_assets - total_unrealized_pnl
+    total_pnl_pct = (total_unrealized_pnl / cost_basis * 100) if cost_basis > 0 else 0.0
 
     data = {
         "total_assets_usdt": round(total_assets, 2),
         "usdt_free": round(usdt_free, 2),
         "usdt_used": round(usdt_used, 2),
-        "positions_value_usdt": round(positions_value, 2),
-        "total_buy_cost": round(total_cost, 2),
+        "positions_value_usdt": round(positions_notional, 2),
         "total_unrealized_pnl": round(total_unrealized_pnl, 2),
         "total_pnl_pct": round(total_pnl_pct, 2),
-        "weighted_24h_change_pct": round(weighted_24h_change / positions_value, 2) if positions_value > 0 else 0,
-        "change_24h_usdt": round(weighted_24h_change / 100, 2) if positions_value > 0 else 0,
+        # v2.0: 合约模式下 24h 加权变化不再从现货余额推导，置 0（后续接入持仓标记价变化）
+        "weighted_24h_change_pct": 0,
+        "change_24h_usdt": 0,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
-    log.info(f"RealtimeAssets: total={total_assets:.2f} USDT, "
-             f"pnl={total_unrealized_pnl:.2f} ({total_pnl_pct:.2f}%), "
-             f"24h_change={data['weighted_24h_change_pct']:.2f}%")
+    log.info(f"RealtimeAssets: equity={total_assets:.2f} USDT, "
+             f"notional={positions_notional:.2f} USDT, "
+             f"unrealized_pnl={total_unrealized_pnl:.2f} ({total_pnl_pct:.2f}%)")
 
     return {"success": True, "data": data}
 
