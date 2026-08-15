@@ -44,16 +44,22 @@ class TestSymbolWhitelist:
 
 
 class TestIdempotencyKey:
-    def test_deterministic(self):
-        from services.trading_service import _make_idempotency_key
-        k1 = _make_idempotency_key("acct1", "BTC/USDT", "buy", 100.0)
-        k2 = _make_idempotency_key("acct1", "BTC/USDT", "buy", 100.0)
-        assert k1 == k2
+    def test_key_includes_account_and_client_id(self):
+        from services.trading_service import _make_idempotency_key, _make_client_order_id
+        cid = _make_client_order_id()
+        k = _make_idempotency_key("acct1", cid)
+        assert k == f"acct1:{cid}"
 
-    def test_diff_params_diff_keys(self):
+    def test_client_order_id_unique(self):
+        from services.trading_service import _make_client_order_id
+        ids = {_make_client_order_id() for _ in range(200)}
+        assert len(ids) == 200  # uuid 唯一性
+
+    def test_diff_accounts_diff_keys(self):
         from services.trading_service import _make_idempotency_key
-        k1 = _make_idempotency_key("a1", "BTC/USDT", "buy", 100.0)
-        k2 = _make_idempotency_key("a1", "BTC/USDT", "sell", 100.0)
+        cid = "sameclientid"
+        k1 = _make_idempotency_key("a1", cid)
+        k2 = _make_idempotency_key("a2", cid)
         assert k1 != k2
 
 

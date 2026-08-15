@@ -40,9 +40,9 @@
 - [x] 删除死代码 `_check_risk_engine`（或真正接入，异常时**默认拒绝**而非放行）
 
 ### 1.2 幂等真正生效
-- [ ] 幂等键改为「秒级 + 随机分量」，通过 `clientOrderId` 传给 OKX
-- [ ] `Order.idempotency_key` 加 `unique=True`，下单前查重
-- [ ] 超时/失败后用 `clientOrderId` 反查交易所再决定是否落库
+- [x] 幂等键改为 uuid 唯一值，通过 `clientOrderId` 传给 OKX
+- [x] `Order.idempotency_key` 加 `unique=True`，下单前 `_find_existing_order` 查重
+- [x] 超时/失败后用 `clientOrderId` 反查交易所（`_reconcile_order_by_client_id`）再决定是否落库
 
 ### 1.3 自动策略统一走审计/落库
 - [ ] `runner` 下单改走 `trading_service` 统一入口（或等价落库逻辑），写入 `orders` + `audit_logs`

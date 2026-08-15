@@ -104,7 +104,7 @@ class Order(Base):
     filled = Column(Float, default=0.0)
     cost = Column(Float, default=0.0)
     exchange_order_id = Column(String(128), nullable=True)
-    idempotency_key = Column(String(128), nullable=True, index=True)  # M3: 幂等键防重复下单
+    idempotency_key = Column(String(128), nullable=True, unique=True)  # v2.0: 幂等键防重复下单（唯一约束）
     raw = Column(JSON, nullable=True)  # M3: 交易所原始返回
     created_at = Column(DateTime, default=_utcnow)
     filled_at = Column(DateTime, nullable=True)

@@ -288,12 +288,16 @@ class ExchangeClient:
         self._ensure_markets()
         return float(self._exchange.amount_to_precision(symbol, amount))
 
-    def create_limit_order(self, symbol: str, side: str, amount: float, price: float) -> Optional[dict]:
+    def create_limit_order(self, symbol: str, side: str, amount: float, price: float,
+                           client_order_id: Optional[str] = None) -> Optional[dict]:
         self._ensure_markets()
         price = self._to_price(symbol, price)
         amount = self._to_amount(symbol, amount)
         try:
-            order = self._exchange.create_limit_order(symbol, side, amount, price)
+            params: dict = {}
+            if client_order_id:
+                params["clientOrderId"] = client_order_id
+            order = self._exchange.create_limit_order(symbol, side, amount, price, params or None)
             self._mark_success()
             return {
                 "id": order.get("id"),
@@ -311,12 +315,17 @@ class ExchangeClient:
             raise ExchangeError(f"下单失败: {e}")
 
     def create_market_order(self, symbol: str, side: str, amount: float,
-                            reduce_only: bool = False) -> Optional[dict]:
-        """下市价单。v2.0: 支持 reduce_only（合约平仓用，只减仓不开新仓）。"""
+                            reduce_only: bool = False,
+                            client_order_id: Optional[str] = None) -> Optional[dict]:
+        """下市价单。v2.0: 支持 reduce_only（合约平仓）+ clientOrderId（幂等/对账）。"""
         self._ensure_markets()
         try:
-            params = {"reduceOnly": True} if reduce_only else None
-            order = self._exchange.create_market_order(symbol, side, amount, None, params)
+            params: dict = {}
+            if reduce_only:
+                params["reduceOnly"] = True
+            if client_order_id:
+                params["clientOrderId"] = client_order_id
+            order = self._exchange.create_market_order(symbol, side, amount, None, params or None)
             self._mark_success()
             return {
                 "id": order.get("id"),
@@ -351,6 +360,30 @@ class ExchangeClient:
             }
         except Exception as e:
             self._mark_failure()
+            return None
+
+    def fetch_order_by_client_id(self, client_order_id: str, symbol: str) -> Optional[dict]:
+        """按 clientOrderId 反查订单（v2.0: 超时/失败后对账用）。"""
+        self._ensure_markets()
+        try:
+            o = self._exchange.fetch_order(client_order_id, symbol, {"clientOrderId": client_order_id})
+            self._mark_success()
+            if o is None:
+                return None
+            return {
+                "id": o.get("id"),
+                "symbol": symbol,
+                "side": o.get("side"),
+                "price": float(o.get("price", 0)),
+                "amount": float(o.get("amount", 0)),
+                "filled": float(o.get("filled", 0)),
+                "cost": float(o.get("cost", 0)),
+                "status": o.get("status"),
+                "timestamp": o.get("timestamp"),
+            }
+        except Exception as e:
+            self._mark_failure()
+            log.debug(f"fetch_order_by_client_id failed: {e}")
             return None
 
     def cancel_order(self, order_id: str, symbol: str) -> bool:

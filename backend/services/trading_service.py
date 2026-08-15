@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+import uuid
 from typing import Optional
 import core.exchange as exmod
 from core.exchange import ExchangeError
@@ -221,9 +222,56 @@ async def flush_pending_order_records() -> int:
     return flushed
 
 
-def _make_idempotency_key(account_id: str, symbol: str, side: str, amount: float) -> str:
-    """生成幂等键（防止网络抖动重复下单）"""
-    return f"{account_id}:{symbol}:{side}:{amount}:{int(time.time() * 1000) // 1000}"
+def _make_client_order_id() -> str:
+    """生成 clientOrderId（16 位 hex，OKX 兼容，唯一且可传给交易所）"""
+    return uuid.uuid4().hex[:16]
+
+
+def _make_idempotency_key(account_id: str, client_order_id: str) -> str:
+    """生成幂等键 = account_id + clientOrderId（v2.0: 唯一，可防重复下单）"""
+    return f"{account_id}:{client_order_id}"
+
+
+async def _find_existing_order(idempotency_key: str) -> dict | None:
+    """查询是否已存在相同幂等键的订单（v2.0: 幂等重放拦截）"""
+    try:
+        from sqlalchemy import select
+        async with async_session() as session:
+            r = await session.execute(
+                select(Order).where(Order.idempotency_key == idempotency_key).limit(1)
+            )
+            row = r.scalar_one_or_none()
+            if row:
+                status = row.status.value if hasattr(row.status, "value") else str(row.status)
+                return {
+                    "id": row.exchange_order_id,
+                    "idempotent_replay": True,
+                    "status": status,
+                }
+    except Exception as e:
+        log.warning(f"Dedup check failed (non-fatal): {e}")
+    return None
+
+
+async def _reconcile_order_by_client_id(account_id: str, symbol: str, side: str,
+                                        amount: float, order_type: OrderType,
+                                        idempotency_key: str, client_order_id: str) -> bool:
+    """下单失败后按 clientOrderId 反查交易所，若订单实际存在则落库（防幽灵单）"""
+    if not client_order_id:
+        return False
+    try:
+        verified = await asyncio.to_thread(
+            exmod.shared_exchange.fetch_order_by_client_id, client_order_id, symbol
+        )
+        if verified:
+            await _record_order_success(
+                account_id, account_id, symbol, side, amount, verified, order_type, idempotency_key
+            )
+            log.warning(f"Order reconciled via clientOrderId={client_order_id}: id={verified.get('id')}")
+            return True
+    except Exception as e:
+        log.warning(f"Order reconcile via clientOrderId failed: {e}")
+    return False
 
 
 # ------------------------------------------------------------------
@@ -524,11 +572,18 @@ async def place_limit_order(user_id: str, symbol: str, side: str,
         log.warning(f"[ORDER_REJECTED] reason=risk_check symbol={symbol} side={side} msg={msg}")
         return None, msg, False
 
-    idempotency_key = _make_idempotency_key(account_id, symbol, side, amount)
+    client_order_id = _make_client_order_id()
+    idempotency_key = _make_idempotency_key(account_id, client_order_id)
+
+    # v2.0: 幂等重放拦截（同一 clientOrderId 不重复下单）
+    existing = await _find_existing_order(idempotency_key)
+    if existing:
+        log.info(f"[ORDER_IDEMPOTENT_REPLAY] key={idempotency_key} -> existing {existing.get('id')}")
+        return existing, None, False
 
     try:
         order = await asyncio.to_thread(
-            exmod.shared_exchange.create_limit_order, symbol, side, amount, price
+            exmod.shared_exchange.create_limit_order, symbol, side, amount, price, client_order_id
         )
         log.info(f"[ORDER_PLACED] type=LIMIT id={order.get('id')} symbol={symbol} "
                  f"side={side} amount={amount} price={order.get('price', price)} "
@@ -562,10 +617,19 @@ async def place_limit_order(user_id: str, symbol: str, side: str,
         return order, None, False
     except ExchangeError as e:
         log.error(f"[ORDER_FAILED] type=LIMIT symbol={symbol} side={side} error={e}")
+        # v2.0: 超时/失败后按 clientOrderId 反查，若订单实际存在则落库（防幽灵单）
+        if await _reconcile_order_by_client_id(
+            account_id, symbol, side, amount, OrderType.LIMIT, idempotency_key, client_order_id
+        ):
+            return {"id": client_order_id, "reconciled": True}, None, False
         await _record_order_failure(user_id, account_id, symbol, side, amount, OrderType.LIMIT, idempotency_key, str(e))
         return None, f"限价单下单失败: {e}", False
     except Exception as e:
         log.error(f"[ORDER_EXCEPTION] type=LIMIT symbol={symbol} side={side} error={e}")
+        if await _reconcile_order_by_client_id(
+            account_id, symbol, side, amount, OrderType.LIMIT, idempotency_key, client_order_id
+        ):
+            return {"id": client_order_id, "reconciled": True}, None, False
         await _record_order_failure(user_id, account_id, symbol, side, amount, OrderType.LIMIT, idempotency_key, str(e))
         return None, f"限价单异常: {e}", False
 
@@ -598,11 +662,18 @@ async def place_market_order(user_id: str, symbol: str, side: str,
         log.warning(f"[ORDER_REJECTED] reason=risk_check symbol={symbol} side={side} msg={msg}")
         return None, msg, False
 
-    idempotency_key = _make_idempotency_key(account_id, symbol, side, amount)
+    client_order_id = _make_client_order_id()
+    idempotency_key = _make_idempotency_key(account_id, client_order_id)
+
+    # v2.0: 幂等重放拦截
+    existing = await _find_existing_order(idempotency_key)
+    if existing:
+        log.info(f"[ORDER_IDEMPOTENT_REPLAY] key={idempotency_key} -> existing {existing.get('id')}")
+        return existing, None, False
 
     try:
         order = await asyncio.to_thread(
-            exmod.shared_exchange.create_market_order, symbol, side, amount
+            exmod.shared_exchange.create_market_order, symbol, side, amount, False, client_order_id
         )
         log.info(f"[ORDER_PLACED] type=MARKET id={order.get('id')} symbol={symbol} "
                  f"side={side} amount={amount} price={order.get('price', 0)} "
@@ -636,10 +707,19 @@ async def place_market_order(user_id: str, symbol: str, side: str,
         return order, None, False
     except ExchangeError as e:
         log.error(f"[ORDER_FAILED] type=MARKET symbol={symbol} side={side} error={e}")
+        # v2.0: 超时/失败后按 clientOrderId 反查，若订单实际存在则落库（防幽灵单）
+        if await _reconcile_order_by_client_id(
+            account_id, symbol, side, amount, OrderType.MARKET, idempotency_key, client_order_id
+        ):
+            return {"id": client_order_id, "reconciled": True}, None, False
         await _record_order_failure(user_id, account_id, symbol, side, amount, OrderType.MARKET, idempotency_key, str(e))
         return None, f"市价单下单失败: {e}", False
     except Exception as e:
         log.error(f"[ORDER_EXCEPTION] type=MARKET symbol={symbol} side={side} error={e}")
+        if await _reconcile_order_by_client_id(
+            account_id, symbol, side, amount, OrderType.MARKET, idempotency_key, client_order_id
+        ):
+            return {"id": client_order_id, "reconciled": True}, None, False
         await _record_order_failure(user_id, account_id, symbol, side, amount, OrderType.MARKET, idempotency_key, str(e))
         return None, f"市价单异常: {e}", False
 
