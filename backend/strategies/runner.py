@@ -26,7 +26,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from strategies.base import SignalType
 from db.database import async_session
-from db.models import Strategy, StrategyStatus, StrategyType, RunnerState, OrderType
+from db.models import Strategy, StrategyStatus, StrategyType, RunnerState, OrderType, Trade
 from sqlalchemy import select
 import core.exchange as exmod
 from core.exchange import ExchangeError
@@ -724,6 +724,7 @@ class StrategyRunner:
             log.warning(f"[RUNNER_CLOSE_SKIP] sid={sid} qty<=0, nothing to close")
             return
         requested_qty = qty
+        entry_usdt = self._positions_usdt.get(sid, 0.0)  # 平仓前已投入资金（算开仓均价）
         close_side = "sell" if side == "long" else "buy"
         log.info(f"[RUNNER_CLOSE_START] sid={sid} symbol={symbol} "
                  f"side={close_side} qty={qty:.6f}")
@@ -765,6 +766,9 @@ class StrategyRunner:
         except Exception as e:
             log.warning(f"StrategyRunner[{sid}] close order record failed (non-fatal): {e}")
 
+        # v2.0: 记录已平仓交易到 Trade 表（供历史/绩效/日亏损熔断/在线学习数据源）
+        await self._record_closed_trade(sid, symbol, side, requested_qty, qty, entry_usdt, order)
+
         # 清理状态 + 持久化（v2.0: 部分成交时保留剩余仓位，不再整体丢失）
         remaining_qty = requested_qty - qty  # qty 已被 verified 覆盖为实际成交量
         if remaining_qty > 1e-10:
@@ -781,6 +785,55 @@ class StrategyRunner:
             self._positions_qty.pop(sid, None)
             log.info(f"[RUNNER_POSITION_CLEARED] sid={sid} symbol={symbol}")
         await self._persist_state(sid)
+
+    async def _record_closed_trade(self, sid: str, symbol: str, side: str,
+                                   requested_qty: float, filled_qty: float,
+                                   entry_usdt: float, order: dict):
+        """平仓后记录 Trade（v2.0: 补齐此前缺失的已平仓交易数据源）。
+
+        该数据源是「交易历史/绩效曲线/日亏损熔断/在线学习」的共同基础，
+        此前 Trade 表只有读取、从未写入，导致这些功能实际恒为空/恒 0。
+        """
+        try:
+            if filled_qty <= 0 or requested_qty <= 0:
+                return
+            entry_price = entry_usdt / requested_qty if requested_qty > 0 else 0.0
+            exit_price = float(order.get("price") or 0)
+            if exit_price <= 0:
+                # 市价单 order 可能无 price，用最新价兜底
+                try:
+                    t = await tick_cache.get(exmod.shared_exchange, symbol)
+                    exit_price = float(t.get("last", 0) or 0)
+                except Exception:
+                    pass
+            if entry_price <= 0 or exit_price <= 0:
+                return
+
+            if side == "long":
+                profit = (exit_price - entry_price) * filled_qty
+            else:
+                profit = (entry_price - exit_price) * filled_qty
+            cost = entry_price * filled_qty
+            profit_pct = (profit / cost * 100) if cost > 0 else 0.0
+
+            async with async_session() as session:
+                session.add(Trade(
+                    strategy_id=sid,
+                    symbol=symbol,
+                    buy_price=round(entry_price, 6),
+                    sell_price=round(exit_price, 6),
+                    quantity=filled_qty,
+                    profit=round(profit, 4),
+                    profit_pct=round(profit_pct, 4),
+                    sell_order_id=str(order.get("id") or ""),
+                    opened_at=_utcnow_naive(),
+                    closed_at=_utcnow_naive(),
+                ))
+                await session.commit()
+            log.info(f"[RUNNER_TRADE_RECORDED] sid={sid} symbol={symbol} "
+                     f"entry={entry_price:.6f} exit={exit_price:.6f} profit={profit:.4f}")
+        except Exception as e:
+            log.warning(f"Runner[{sid}] record closed trade failed (non-fatal): {e}")
 
     def is_running(self, strategy_id: str) -> bool:
         t = self._tasks.get(strategy_id)

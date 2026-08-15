@@ -89,6 +89,7 @@
 - [x] 修复 `GridStrategy` 构造签名不匹配（`runner.py` vs `grid.py`）
 
 ### 2.4 在线学习接线
+- [x] 补齐 Trade 数据源：runner 平仓后写入 `Trade` 表（此前仅读取、从未写入，导致历史/绩效/日亏损/在线学习恒空）
 - [ ] `online_learner.update()` 挂入定时任务，权重喂给 `strategy_pool.weight` / `portfolio_allocator`
 - [ ] `strategy_pool.update_performance()` 接入生产循环，让自动休眠/淘汰/相关性真正生效
 - [ ] 清理死代码：`signal_matrix`、`onchain_data`、`validation_pipeline` 的桩函数
