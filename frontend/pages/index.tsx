@@ -38,7 +38,7 @@ export default function Dashboard() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-white">{t("dash.overview")}</h2>
+          <h2 className="text-lg font-semibold text-white prompt">{t("dash.overview")}</h2>
           <p className="text-xs text-dark-400 mt-1">{t("dash.overviewSub")}</p>
         </div>
         <button
@@ -51,6 +51,7 @@ export default function Dashboard() {
 
       <PortfolioSummary refreshKey={0} />
 
+      <div className="ascii-divider"><span className="ascii-label">EQUITY</span></div>
       <EquityChart />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -178,9 +179,10 @@ export default function Dashboard() {
           )}
 
       {/* Recent Trades */}
+      <div className="ascii-divider"><span className="ascii-label">RECENT TRADES</span></div>
       <div className="card">
         <div className="flex items-center justify-between mb-3">
-          <span className="text-sm font-semibold text-white">{t("dash.recentTrades")}</span>
+          <span className="text-sm font-semibold text-white prompt">{t("dash.recentTrades")}</span>
           <span className="text-xs text-dark-400">{trades.length} {t("dash.records")}</span>
         </div>
         <div className="overflow-x-auto">

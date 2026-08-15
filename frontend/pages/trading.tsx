@@ -73,7 +73,7 @@ export default function TradingPage() {
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       {/* Order Form */}
       <div className="card lg:col-span-1 space-y-0">
-        <h3 className="text-sm font-semibold text-white mb-4">{t("trade.placeOrder")}</h3>
+        <h3 className="text-sm font-semibold text-white mb-4 prompt">{t("trade.placeOrder")}</h3>
         <div className="flex rounded-lg overflow-hidden border border-dark-800 mb-4">
           <button
             onClick={() => setSide("buy")}
@@ -222,7 +222,7 @@ export default function TradingPage() {
         )}
         <div className="card">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-white">{t("trade.openOrders")}</h3>
+            <h3 className="text-sm font-semibold text-white prompt">{t("trade.openOrders")}</h3>
             <button onClick={() => setRefreshKey((k) => k + 1)} className="btn-ghost text-xs py-1 px-3"><RefreshCw size={12} /></button>
           </div>
           <div className="overflow-x-auto">
