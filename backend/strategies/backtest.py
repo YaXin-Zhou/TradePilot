@@ -106,6 +106,8 @@ class BacktestEngine:
         df["signal"] = 0
         df.loc[df["fast_ma"] > df["slow_ma"], "signal"] = 1
         df.loc[df["fast_ma"] < df["slow_ma"], "signal"] = -1
+        # v2.0: 消除前视偏差 — 信号用前一根 K 线，成交用当前 K 线
+        df["signal"] = df["signal"].shift(1).fillna(0).astype(int)
         df = df.dropna().reset_index(drop=True)
         for i in range(len(df)):
             row = df.iloc[i]
@@ -135,6 +137,8 @@ class BacktestEngine:
         avg_l = loss.rolling(period).mean()
         rs = avg_g / avg_l
         df["rsi"] = 100 - (100 / (1 + rs))
+        # v2.0: 消除前视偏差 — RSI 用前一根 K 线
+        df["rsi"] = df["rsi"].shift(1)
         df = df.dropna().reset_index(drop=True)
         for i in range(len(df)):
             row = df.iloc[i]
@@ -159,6 +163,9 @@ class BacktestEngine:
         df["std"] = df["close"].rolling(period).std()
         df["upper"] = df["sma"] + std_dev * df["std"]
         df["lower"] = df["sma"] - std_dev * df["std"]
+        # v2.0: 消除前视偏差 — 布林带用前一根 K 线
+        df["upper"] = df["upper"].shift(1)
+        df["lower"] = df["lower"].shift(1)
         df = df.dropna().reset_index(drop=True)
         for i in range(len(df)):
             row = df.iloc[i]

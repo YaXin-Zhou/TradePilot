@@ -77,7 +77,7 @@
 - [ ] `scientific_passed` 纳入 DSR、NW t、真实 BH p 值，而非退化成「OOS 夏普>0」
 
 ### 2.2 消除前视偏差
-- [ ] 回测信号用 `close[i-1]`、成交用 `open[i]`（或下一根），杜绝用当前收盘价信号在当前收盘价成交
+- [x] 回测信号用前一根 K 线（MA/RSI/布林带均 shift(1)），杜绝当前收盘价信号在当前收盘价成交
 
 ### 2.3 AI 闭环闭合
 - [ ] 补 `ml.models.train_model` 函数（scheduler 每 24h 引用但函数不存在）
