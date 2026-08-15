@@ -1,7 +1,7 @@
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import PortfolioSummary from "../components/PortfolioSummary";
-import PriceChart, { LiveTicker } from "../components/PriceChart";
-import EquityChart from "../components/EquityChart";
+import type { LiveTicker } from "../components/PriceChart";
 import RiskDashboard from "../components/RiskDashboard";
 import { useLanguage } from "../lib/LanguageContext";
 import { useRealtime } from "../lib/useRealtime";
@@ -10,6 +10,16 @@ import {
   TrendingUp, TrendingDown, Activity, Brain, RefreshCw,
   ArrowUpRight, ArrowDownRight, Minus
 } from "lucide-react";
+
+// V4 D: 图表（Recharts 较重）按需加载，降低首屏 JS 体积
+const PriceChart = dynamic(() => import("../components/PriceChart"), {
+  ssr: false,
+  loading: () => <div className="card h-80 animate-pulse" />,
+});
+const EquityChart = dynamic(() => import("../components/EquityChart"), {
+  ssr: false,
+  loading: () => <div className="card h-40 animate-pulse" />,
+});
 
 export default function Dashboard() {
   const [ticker, setTicker] = useState<LiveTicker | undefined>(undefined);
