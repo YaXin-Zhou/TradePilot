@@ -84,6 +84,7 @@ class IterationRound:
     top_sharpe_is: float = 0.0
     top_sharpe_oos: float = 0.0
     top_score: float = 0.0
+    pbo: float = 0.0       # v2.1: 本轮多 variant 的 CSCV 过拟合概率
     ai_analysis: str = ""
     status: str = "pending"  # pending | generating | backtesting | done
     error: str = ""
@@ -473,6 +474,8 @@ def _run_single_backtest(variant: dict, ohlcv_df, capital: float, task_id: str, 
             v["nw_t_stat"] = validation.get("nw_t_stat", 0)
             v["spa_p_value"] = validation.get("spa_p_value", 0)
             v["scientific_passed"] = validation.get("scientific_passed", False)
+        # v2.1: 保留 equity_curve，用于多 variant 的 CSCV PBO
+        v["equity_curve"] = result.get("equity_curve", [])
         v["status"] = "done"
     except Exception as e:
         v["status"] = "failed"
@@ -507,6 +510,31 @@ def _rank_variants(variants: list[dict]) -> list[dict]:
     for v in variants:
         v["score"] = v.get("sharpe_is", 0) * 0.3 + v.get("sharpe_oos", 0) * 0.7
     return sorted(variants, key=lambda x: x.get("score", 0), reverse=True)
+
+
+def _compute_round_pbo(results: list[dict]) -> float:
+    """从多个 variant 的 equity_curve 构建收益矩阵，计算 CSCV PBO。
+
+    v2.1: 单 config 无法做 CSCV（返回 0.5），需 >= 2 个有效 variant。
+    """
+    import numpy as np
+    from services.validation import _equity_to_returns, compute_cscv_pbo
+
+    return_series = []
+    for v in results:
+        if v.get("status") != "done":
+            continue
+        eq = v.get("equity_curve") or []
+        rets = _equity_to_returns(eq)
+        if len(rets) >= 32:
+            return_series.append(rets)
+
+    if len(return_series) < 2:
+        return 0.5
+
+    min_len = min(len(r) for r in return_series)
+    matrix = np.column_stack([r[:min_len] for r in return_series])  # (trials, configs)
+    return compute_cscv_pbo(matrix)
 
 
 # ─── 收敛检测 ──────────────────────────────────────────────────
@@ -775,16 +803,17 @@ async def _run_round(
     done = sum(1 for v in ranked if v["status"] == "done")
     sci = sum(1 for v in ranked if v.get("scientific_passed"))
 
-    # 7. 记录最佳指标
+    # 7. 记录最佳指标 + 本轮 CSCV PBO（多 variant 过拟合概率）
     if ranked:
         rd.top_sharpe_is = max(v.get("sharpe_is", 0) for v in ranked)
         rd.top_sharpe_oos = max(v.get("sharpe_oos", 0) for v in ranked)
         rd.top_score = ranked[0].get("score", 0)
+    rd.pbo = _compute_round_pbo(results)
 
     rd.status = "done"
     log.info(
         f"Iteration {task_id} round {round_num}: {done}/{len(results)} completed, "
-        f"{sci} scientifically validated, top_score={rd.top_score:.3f}"
+        f"{sci} scientifically validated, top_score={rd.top_score:.3f}, pbo={rd.pbo:.3f}"
     )
     return rd.to_dict()
 
