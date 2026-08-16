@@ -331,6 +331,8 @@ class StrategyRunner:
             log.warning(f"StrategyRunner[{strategy_id}]: cannot acquire lock, refuse to start")
             return
         self._tasks[strategy_id] = asyncio.create_task(self._run_loop(strategy_id, strategy_obj))
+        symbol = getattr(strategy_obj, "symbol", "") or ""
+        log_event(strategy_id, "started", f"Strategy started (symbol={symbol})")
 
     async def stop(self, strategy_id: str):
         task = self._tasks.pop(strategy_id, None)
@@ -409,21 +411,44 @@ class StrategyRunner:
                 return 0
 
             recovered = 0
+            pending_retry: list[tuple[str, object]] = []
             for s in strategies:
                 try:
                     obj = _build_strategy_obj(s)
                     if obj:
                         await self.start(s.id, obj)
-                        recovered += 1
-                        log.info(f"Runner: recovered strategy {s.id} ({s.name})")
+                        if s.id in self._tasks:
+                            recovered += 1
+                            log.info(f"Runner: recovered strategy {s.id} ({s.name})")
+                        else:
+                            # 锁被上一实例持有（TTL 未到）→ 锁过期后重试一次
+                            pending_retry.append((s.id, obj))
                 except Exception as e:
                     log.error(f"Runner: recover {s.id} failed: {e}")
+
+            if pending_retry:
+                asyncio.create_task(self._retry_recovery(pending_retry))
 
             log.info(f"Runner: recovered {recovered}/{len(strategies)} RUNNING strategies")
             return recovered
         except Exception as e:
             log.error(f"Runner: recover_running_strategies failed: {e}")
             return 0
+
+    async def _retry_recovery(self, pending: list[tuple[str, object]]):
+        """v5: 锁 TTL 到期后重试恢复（崩溃重启时上一实例的锁可能尚未过期）。"""
+        await asyncio.sleep(LOCK_TTL_SECONDS + 5)
+        for sid, obj in pending:
+            if sid in self._tasks:
+                continue
+            try:
+                await self.start(sid, obj)
+                if sid in self._tasks:
+                    log.info(f"Runner: delayed recovery started {sid}")
+                else:
+                    log.warning(f"Runner: delayed recovery {sid} still cannot start (lock/ks)")
+            except Exception as e:
+                log.error(f"Runner: delayed recovery {sid} failed: {e}")
 
     # ------------------------------------------------------------------
     # 辅助：数据获取

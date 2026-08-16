@@ -19,6 +19,9 @@ node_modules/
 *.db
 *.db-journal
 
+# ML 训练产物（运行时生成的模型文件，不入库）
+backend/ml/models/
+
 # Runtime state files (运行时状态，不应入库)
 backend/data/*.json
 backend/data/heartbeats/

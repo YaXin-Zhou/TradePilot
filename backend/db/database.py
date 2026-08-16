@@ -64,6 +64,11 @@ async def _try_alembic_upgrade() -> bool:
     成功返回 True，失败返回 False 由调用方回退。
     生产部署推荐：先 `alembic upgrade head` 再启动 uvicorn，本函数作为兜底。
 
+    v5: SQLite 直接返回 False，走 create_all 回退路径。原因：alembic 迁移脚本
+    （0001_initial）内部用「同步连接」执行 Base.metadata.create_all，与 aiosqlite
+    的异步连接在同一进程内会死锁，导致启动卡住数分钟。SQLite 本地开发本就以
+    create_all 为 schema 来源，跳过 alembic 既更快又正确。
+
     v1.3 fix: 多 worker 并发启动时，用文件锁保证只有一个 worker 执行迁移，
     其余 worker 等待并跳过（避免 4 个 Alembic 同时跑造成 DB 锁竞争）。
     锁超时 120s，超时后 worker 回退到 create_all。
@@ -71,6 +76,10 @@ async def _try_alembic_upgrade() -> bool:
     import time as _time
     from pathlib import Path
     import sys
+
+    # v5: SQLite 跳过 alembic（同步迁移与 aiosqlite 死锁），直接用 create_all
+    if "sqlite" in settings.DATABASE_URL.lower():
+        return False
 
     backend_dir = Path(__file__).parent.parent
     alembic_ini = backend_dir / "alembic.ini"

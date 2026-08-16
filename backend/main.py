@@ -51,9 +51,10 @@ async def lifespan(app: FastAPI):
         await init_db()
         log.info(f"init_db completed (pid={os.getpid()})")
         # 确保策略日志表存在
-        from services.strategy_log import _ensure_table, recover_all_from_db
+        from services.strategy_log import _ensure_table, recover_all_from_db, backfill_created_events
         await _ensure_table()
         await recover_all_from_db()
+        await backfill_created_events()
     except Exception as e:
         log.critical(f"init_db() FAILED — database may be unavailable: {e}")
 

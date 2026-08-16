@@ -130,7 +130,7 @@ async def start_strategy(strategy_id: str) -> dict:
         s.status = StrategyStatus.RUNNING
         s.started_at = _utcnow_naive()
         await session.commit()
-        log_event(strategy_id, "started", f"Strategy started ({s.type.value} {s.symbol})")
+        # started 事件由 runner.start() 统一落库（避免手动启动与崩溃恢复路径重复/漏记）
     return {"success": True}
 
 
@@ -234,6 +234,7 @@ async def save_ai_strategy(
             await session.refresh(strategy)
             sid = strategy.id
 
+        log_event(sid, "created", f"AI strategy '{name}' created ({strategy_type} on {symbol})")
         log.info(f"AI 策略自动入库: {sid} ({name}, {strategy_type})")
         return {"success": True, "data": {"id": sid}}
 
