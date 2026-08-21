@@ -657,7 +657,11 @@ class StrategyRunner:
             order_usdt = settings.MAX_ORDER_AMOUNT_USDT
             log.info(f"StrategyRunner[{sid}]: capped order to {order_usdt} (hard limit)")
 
-        order_amount = order_usdt / current_price
+        # v6: 金额转「张数」——OKX 永续的 amount 单位是张(contracts)，不是币数量。
+        # 张数 = USDT / (价格 × contractSize)。此前漏除 contractSize，导致下单张数
+        # 小于最小精度 0.01 张而报 "must be greater than minimum amount precision"。
+        contract_size = exmod.shared_exchange.get_contract_size(obj.symbol)
+        order_amount = order_usdt / (current_price * contract_size)
 
         # 7. risk_engine 全链路检查（v2.0: 真实 daily_pnl + 真实 Sharpe，不再恒 0/1.0）
         sharpe = await self._get_strategy_sharpe(sid, obj)
@@ -887,7 +891,8 @@ class StrategyRunner:
         try:
             if filled_qty <= 0 or requested_qty <= 0:
                 return
-            entry_price = entry_usdt / requested_qty if requested_qty > 0 else 0.0
+            cs = exmod.shared_exchange.get_contract_size(symbol)
+            entry_price = entry_usdt / (requested_qty * cs) if requested_qty > 0 else 0.0
             exit_price = float(order.get("price") or 0)
             if exit_price <= 0:
                 # 市价单 order 可能无 price，用最新价兜底
@@ -900,10 +905,10 @@ class StrategyRunner:
                 return
 
             if side == "long":
-                profit = (exit_price - entry_price) * filled_qty
+                profit = (exit_price - entry_price) * filled_qty * cs
             else:
-                profit = (entry_price - exit_price) * filled_qty
-            cost = entry_price * filled_qty
+                profit = (entry_price - exit_price) * filled_qty * cs
+            cost = entry_price * filled_qty * cs
             profit_pct = (profit / cost * 100) if cost > 0 else 0.0
 
             async with async_session() as session:
