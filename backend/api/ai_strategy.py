@@ -117,10 +117,9 @@ class SaveToWarehouseRequest(BaseModel):
 
 @router.post("/iterate/save-to-warehouse")
 async def save_iteration_to_warehouse(req: SaveToWarehouseRequest, _user: dict = Depends(get_current_user)):
-    """将迭代产出的达标策略手动保存到策略库"""
+    """将迭代产出的达标策略手动保存到策略库（v6 3.1: 仅存草稿，不自动入池，需人工注册启用）"""
     from datetime import datetime
     from services.strategy_service import save_ai_strategy
-    from services.strategy_pool import strategy_pool
 
     auto_name = f"Iter-{req.strategy_type}-{req.symbol.replace('/', '')}-{datetime.now().strftime('%m%d%H%M')}"
     backtest = {
@@ -136,8 +135,8 @@ async def save_iteration_to_warehouse(req: SaveToWarehouseRequest, _user: dict =
     )
     if result.get("success"):
         sid = result["data"]["id"]
-        strategy_pool.register(sid, auto_name, req.strategy_type)
-        return {"success": True, "data": {"strategy_id": sid, "name": auto_name}}
+        # v6 3.1: 保存为 DRAFT，不入池；前端引导用户经 /api/strategies/pool/{id}/register 手动启用
+        return {"success": True, "data": {"strategy_id": sid, "name": auto_name, "draft": True}}
     return result
 
 

@@ -33,8 +33,8 @@
 ## 三、砍过拟合（AI 挖因子的反噬）
 
 ### 3.1 AI 策略工厂默认「仅草稿 + 人工确认」
-- [ ] `save_ai_strategy` 入库的 AI 策略默认 status=DRAFT，不直接进策略池；只有通过人工确认后才可启用
-- [ ] 阻断「1 笔交易 + 假夏普」直接进池的通道
+- [x] `ai_service.py` 自动入库不再自动注册策略池，仅保存为 DRAFT；新增最少交易笔数门槛（`total_trades>=5`），阻断「1 笔交易 + 假夏普」自动入库
+- [x] `api/ai_strategy.py` save-to-warehouse 不再自动入池，返回 draft 标记，需人工经 `/pool/{id}/register` 启用
 
 ## 四、最小实盘闭环
 

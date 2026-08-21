@@ -116,19 +116,22 @@ async def analyze_market(
     backtest_formatted = _format_backtest_result(backtest_result)
     validation_formatted = _sanitize_json(validation) if validation else None
 
-    # 6. 自动入库：仅科学验证通过（PBO≤0.5 且 OOS夏普>0）的策略才入库
+    # 6. 自动入库：仅「科学验证通过 + 最少交易笔数」才保存为草稿（v6: 不自动入池，需人工确认）
     strategy_id = None
     pool_registered = False
     auto_save_skipped = False
-    if st and backtest_formatted and scientific_valid:
+    auto_save_reason = ""
+    MIN_TRADES = 5  # v6 3.1: 少于 5 笔的回测结果无统计意义（1 笔 100% 胜率是噪声），禁止自动入库
+
+    total_trades = int((backtest_formatted or {}).get("total_trades", 0) or 0)
+    if st and backtest_formatted and scientific_valid and total_trades >= MIN_TRADES:
         try:
             from services.strategy_service import save_ai_strategy
-            from services.strategy_pool import strategy_pool
 
             # 自动生成策略名称
             auto_name = name or f"AI-{st}-{symbol.replace('/', '')}-{datetime.now().strftime('%m%d%H%M')}"
 
-            # 保存到策略表
+            # 保存到策略表（status=DRAFT）
             save_result = await save_ai_strategy(
                 name=auto_name,
                 strategy_type=st,
@@ -140,16 +143,18 @@ async def analyze_market(
             )
             if save_result.get("success"):
                 strategy_id = save_result["data"]["id"]
-                # 注册到策略池
-                strategy_pool.register(strategy_id, auto_name, st)
-                pool_registered = True
-                log.info(f"AI 策略自动入库+入池: {strategy_id} ({auto_name})")
+                # v6 3.1: 不自动入池，保存为 DRAFT，待人工确认后经 /pool/{id}/register 启用
+                pool_registered = False
+                log.info(f"AI 策略自动入库(草稿): {strategy_id} ({auto_name}), 待人工确认入池")
         except Exception as e:
             log.warning(f"AI 策略自动入库失败（不影响主流程）: {e}")
-
-    if not scientific_valid and st and backtest_formatted:
+    elif st and backtest_formatted:
         auto_save_skipped = True
-        log.info(f"AI strategy skipped auto-save: scientific_valid=False for {st}")
+        if not scientific_valid:
+            auto_save_reason = "scientific_valid=False"
+        else:
+            auto_save_reason = f"total_trades={total_trades}<{MIN_TRADES}（样本不足）"
+        log.info(f"AI strategy skipped auto-save: {auto_save_reason} for {st}")
 
     return {
         "success": True,
@@ -168,6 +173,7 @@ async def analyze_market(
             "validation": validation_formatted,
             "scientific_valid": scientific_valid,
             "auto_save_skipped": auto_save_skipped,
+            "auto_save_reason": auto_save_reason,
             "strategy_id": strategy_id,
             "pool_registered": pool_registered,
         },
