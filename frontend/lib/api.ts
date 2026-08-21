@@ -173,6 +173,8 @@ export const api = {
     }),
   getMarketRegime: (symbol = "BTC/USDT", timeframe = "1h") =>
     request(`/api/analysis/market-regime?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}`),
+  getAdaptiveState: (symbol = "BTC/USDT") =>
+    request(`/api/analysis/adaptive?symbol=${encodeURIComponent(symbol)}`),
   // Risk Engine
   getRiskPolicies: () => request("/api/analysis/risk-policies"),
   updateRiskPolicy: (data: {

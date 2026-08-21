@@ -86,3 +86,52 @@ def adapt_weights(regime: MarketRegime, strategies: list[dict],
         return {}
     scale = _EXPOSURE_SCALE.get(regime, 1.0)
     return {sid: round(w / total * scale, 6) for sid, w in raw.items()}
+
+
+async def get_adaptive_snapshot(symbol: str = "BTC/USDT") -> dict:
+    """AI 自适应快照（v6 问题2）：regime + 因子 + 各策略权重乘数 + 当前 regime 风控策略。
+
+    供前端「AI 自适应」面板展示：让用户直观看到三件事——
+      1. regime 识别（趋势/震荡 × 高/低波动 → 动量/波动率因子）
+      2. 权重自适应（策略类型 × regime 乘数 → 有效权重）
+      3. 风控（当前 regime 的仓位/止损/日亏/入场门槛）
+    """
+    import asyncio
+    from core.exchange import shared_exchange
+    from services.regime_detector import regime_detector
+    from services.risk_engine import risk_engine
+
+    # 1. regime + 因子
+    try:
+        df = await asyncio.to_thread(shared_exchange.fetch_ohlcv, symbol, "1h", 200)
+        ohlcv = df.to_dict("records") if df is not None and not df.empty else []
+        regime_result = regime_detector.detect(ohlcv, symbol)
+    except Exception:
+        regime_result = regime_detector.detect([], symbol)
+
+    # 2. 各策略权重自适应
+    from services.strategy_pool import strategy_pool
+    strategies = strategy_pool.list_all()
+    weights = []
+    for s in strategies:
+        mult = strategy_multiplier(regime_result.regime, s.strategy_type)
+        base = s.weight if s.weight > 0 else 0.1  # 与 runner 回退默认权重一致
+        weights.append({
+            "strategy_id": s.id,
+            "name": s.name,
+            "type": s.strategy_type,
+            "pool_weight": round(s.weight, 4),
+            "regime_multiplier": mult,
+            "effective_weight": round(base * mult, 4),
+            "compatible": mult > 0,
+        })
+
+    # 3. 当前 regime 风控策略
+    policy = risk_engine.get_policy(regime_result.regime)
+
+    return {
+        "symbol": symbol,
+        "regime": regime_result.to_dict(),
+        "weights": weights,
+        "risk_policy": policy.to_dict(),
+    }

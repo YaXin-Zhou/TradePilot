@@ -5,6 +5,7 @@ import { Brain, Send, Zap, RefreshCw, TrendingUp, TrendingDown, Minus, ArrowUpRi
 import type { AiAnalyzeResult, AiAnalyzeRequest } from "../types/strategy";
 import type { Ticker } from "../types/portfolio";
 import { asApiError } from "../types/api";
+import AdaptivePanel from "../components/AdaptivePanel";
 
 
 export default function AIStrategyPage() {
@@ -65,6 +66,9 @@ export default function AIStrategyPage() {
           {connected === true ? "DeepSeek API 已连接" : connected === false ? "DeepSeek API 未配置，请在 .env 设置 DEEPSEEK_API_KEY" : "检测 DeepSeek 连接..."}
         </span>
       </div>
+
+      {/* v6 问题2：AI 三件事可视化（regime 识别 / 权重自适应 / 风控） */}
+      <AdaptivePanel />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="space-y-4">

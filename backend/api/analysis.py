@@ -39,6 +39,23 @@ def get_market_regime(
         return {"success": False, "error": str(e), "data": None}
 
 
+@router.get("/adaptive")
+async def get_adaptive_state(
+    symbol: str = Query("BTC/USDT"),
+    _user: dict = Depends(get_current_user),
+):
+    """AI 自适应快照：regime 识别 + 因子 + 各策略权重自适应 + 当前 regime 风控策略。
+
+    v6 问题2：把「AI 三件事」真正落地并对前端可见。
+    """
+    try:
+        from services.regime_adapt import get_adaptive_snapshot
+        snapshot = await get_adaptive_snapshot(symbol)
+        return {"success": True, "data": snapshot}
+    except Exception as e:
+        return {"success": False, "error": str(e), "data": None}
+
+
 # ------------------------------------------------------------------
 # 风控策略管理
 # ------------------------------------------------------------------
