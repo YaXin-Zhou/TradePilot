@@ -40,7 +40,9 @@ class Settings:
 
     # 服务器
     HOST: str = os.getenv("HOST", "0.0.0.0")
-    PORT: int = int(os.getenv("PORT", "8000"))
+    # v6: 默认 8090（8000/8001 可能落入 Windows Hyper-V/WSL2 动态端口排除范围 7982-8081，
+    # 导致 bind winerror 10013）
+    PORT: int = int(os.getenv("PORT", "8090"))
     DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
 
     # Redis（v1.2: rate_limiter + 缓存）

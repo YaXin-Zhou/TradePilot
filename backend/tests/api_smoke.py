@@ -7,7 +7,7 @@ import time
 from urllib import request as urlreq
 from urllib.error import HTTPError, URLError
 
-BASE = "http://127.0.0.1:8000"
+BASE = "http://127.0.0.1:8090"
 
 # (method, path, body|None, 需要鉴权, 描述)
 ENDPOINTS = [

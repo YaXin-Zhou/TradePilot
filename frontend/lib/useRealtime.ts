@@ -3,7 +3,7 @@ import { useEffect, useRef, useCallback, useState } from "react";
 type MessageHandler = (msg: unknown) => void;
 
 // Phase 8: 支持环境变量配置 WS URL（生产 wss）
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws/ticker";
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8090/ws/ticker";
 
 // Phase 8: 指数退避重连间隔（上限 30s）
 const RECONNECT_INTERVALS = [2000, 4000, 8000, 16000, 30000];
