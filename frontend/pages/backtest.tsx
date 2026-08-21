@@ -20,6 +20,22 @@ const STRATEGIES = [
 const SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"];
 const TIMEFRAMES = ["1h", "4h", "1d"];
 
+/** 策略库策略类型 → 回测类型/参数映射（v6 问题3） */
+function mapLibraryStrategy(s: Record<string, any>): { strategy: string; params: BacktestParams } | null {
+  const t = s.type;
+  const cfg = s.config || {};
+  if (t === "ma_cross" || t === "sma_cross") {
+    return { strategy: "ma_crossover", params: { fast: cfg.fast || 10, slow: cfg.slow || 30 } };
+  }
+  if (t === "rsi") {
+    return { strategy: "rsi", params: { period: cfg.period || 14, oversold: cfg.oversold || 30, overbought: cfg.overbought || 70 } };
+  }
+  if (t === "bollinger") {
+    return { strategy: "bollinger", params: { period: cfg.period || 20, std_dev: cfg.std ?? cfg.std_dev ?? 2.0 } };
+  }
+  return null; // grid / custom / ai_generated 无直接回测映射
+}
+
 /** 回测参数 — 不同策略使用不同字段子集 */
 interface BacktestParams {
   fast?: number;
@@ -60,6 +76,9 @@ export default function BacktestPage() {
   const [tradingFee, setTradingFee] = useState(0.001);
   const [slippage, setSlippage] = useState(0.001);
   const [strategy, setStrategy] = useState("ma_crossover");
+  const [useLibrary, setUseLibrary] = useState(false);
+  const [libraryStrategies, setLibraryStrategies] = useState<any[]>([]);
+  const [selectedLibraryId, setSelectedLibraryId] = useState("");
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<Record<string, any> | null>(null);
   const [params, setParams] = useState<BacktestParams>({ fast: 10, slow: 30 });
@@ -67,6 +86,23 @@ export default function BacktestPage() {
   const [progress, setProgress] = useState(0);
   const [progressStage, setProgressStage] = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // 加载策略库（v6 问题3：可从策略库下拉选择策略回测）
+  useEffect(() => {
+    api.listStrategies().then((s) => setLibraryStrategies((s ?? []) as any[])).catch(() => {});
+  }, []);
+
+  const selectLibraryStrategy = (id: string) => {
+    setSelectedLibraryId(id);
+    const s = libraryStrategies.find((x) => x.id === id);
+    if (!s) return;
+    const mapped = mapLibraryStrategy(s);
+    if (mapped) {
+      setStrategy(mapped.strategy);
+      setParams(mapped.params);
+      setSymbol(s.symbol || "BTC/USDT");
+    }
+  };
 
   // 清理轮询
   useEffect(() => {
@@ -205,18 +241,49 @@ export default function BacktestPage() {
                   min="0" max="0.05" step="0.0005"
                   className="w-full text-sm py-1.5 px-2 rounded border border-dark-800 bg-dark-900 text-dark-200" />
               </div>
+              {/* 策略来源：内置类型 / 策略库（v6 问题3） */}
               <div>
-                <label className="text-xs text-dark-400 block mb-1">{t("strat.type")}</label>
-                <select value={strategy} onChange={e => {
-                  setStrategy(e.target.value);
-                  if (e.target.value === "ma_crossover") setParams({ fast: 10, slow: 30 });
-                  else if (e.target.value === "rsi") setParams({ period: 14, oversold: 30, overbought: 70 });
-                  else if (e.target.value === "bollinger") setParams({ period: 20, std_dev: 2.0 });
-                }}
-                  className="w-full text-sm py-1.5 px-2 rounded border border-dark-800 bg-dark-900 text-dark-200">
-                  {STRATEGIES.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
+                <label className="text-xs text-dark-400 block mb-1">{lang==="zh"?"策略来源":"Strategy Source"}</label>
+                <div className="flex rounded-lg overflow-hidden border border-dark-800">
+                  <button onClick={() => { setUseLibrary(false); setSelectedLibraryId(""); }}
+                    className={`flex-1 py-1.5 text-xs font-medium transition-all ${!useLibrary ? "bg-okx-green text-black" : "bg-dark-900 text-dark-400"}`}>
+                    {lang==="zh"?"内置策略":"Built-in"}
+                  </button>
+                  <button onClick={() => setUseLibrary(true)}
+                    className={`flex-1 py-1.5 text-xs font-medium transition-all ${useLibrary ? "bg-okx-green text-black" : "bg-dark-900 text-dark-400"}`}>
+                    {lang==="zh"?"策略库":"Library"}
+                  </button>
+                </div>
               </div>
+
+              {useLibrary ? (
+                <div>
+                  <label className="text-xs text-dark-400 block mb-1">{lang==="zh"?"选择策略":"Select Strategy"}</label>
+                  <select value={selectedLibraryId} onChange={e => selectLibraryStrategy(e.target.value)}
+                    className="w-full text-sm py-1.5 px-2 rounded border border-dark-800 bg-dark-900 text-dark-200">
+                    <option value="">{lang==="zh"?"— 选择策略库策略 —":"— Select library strategy —"}</option>
+                    {libraryStrategies.map(s => (
+                      <option key={s.id} value={s.id}>{s.name} ({s.type})</option>
+                    ))}
+                  </select>
+                  {selectedLibraryId && !mapLibraryStrategy(libraryStrategies.find(x => x.id === selectedLibraryId) || {}) && (
+                    <p className="text-[10px] text-okx-yellow mt-1">{lang==="zh"?"该类型策略不支持直接回测":"This strategy type is not directly backtestable"}</p>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <label className="text-xs text-dark-400 block mb-1">{t("strat.type")}</label>
+                  <select value={strategy} onChange={e => {
+                    setStrategy(e.target.value);
+                    if (e.target.value === "ma_crossover") setParams({ fast: 10, slow: 30 });
+                    else if (e.target.value === "rsi") setParams({ period: 14, oversold: 30, overbought: 70 });
+                    else if (e.target.value === "bollinger") setParams({ period: 20, std_dev: 2.0 });
+                  }}
+                    className="w-full text-sm py-1.5 px-2 rounded border border-dark-800 bg-dark-900 text-dark-200">
+                    {STRATEGIES.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+              )}
               {renderParams()}
               <button onClick={runBacktest} disabled={running}
                 className="btn-primary w-full flex items-center justify-center gap-2 text-sm py-2.5 mt-2">
