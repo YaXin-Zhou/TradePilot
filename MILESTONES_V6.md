@@ -44,8 +44,10 @@
 ## 五、AI 自适应重写（替代「AI 挖因子」）
 
 ### 5.1 regime 自适应权重模块
-- [ ] 固定小因子池（动量/均值回归/波动率/资金费率/基差/OI），新增 `regime_adapt`：按当前 regime 调策略权重/参数，替代随机变体搜索
-- [ ] 默认 fail-closed：样本外不通过时回退到空仓/基准
+- [x] 新增 `services/regime_adapt.py`：固定「策略类型 × regime」偏好表，按当前 regime 调策略权重（趋势市偏趋势、震荡市偏均值回归、高波动降敞口）；`adapt_weights` + `strategy_multiplier`
+- [x] fail-closed：无兼容策略时返回空权重（空仓），不强行为保持仓位而分配
+- [x] 接入 runner `_get_strategy_weight`（传入 regime + strategy_type 应用乘数）
+- [x] 新增 `tests/test_regime_adapt.py`（8 个用例）
 
 ---
 

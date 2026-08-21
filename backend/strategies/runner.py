@@ -473,16 +473,29 @@ class StrategyRunner:
             log.debug(f"USDT balance read failed: {e}")
             return 0.0
 
-    def _get_strategy_weight(self, strategy_id: str) -> float:
-        """从策略池获取权重，拿不到默认 0.1"""
+    def _get_strategy_weight(self, strategy_id: str, regime=None, strategy_type: str = "") -> float:
+        """从策略池获取权重，拿不到默认 0.1。
+
+        v6 5.1: 传入 regime + strategy_type 时应用 regime 自适应乘数（趋势市压
+        均值回归、震荡市压趋势策略；不兼容类型乘 0 → 不参与分配）。
+        """
         try:
             from services.strategy_pool import strategy_pool
             s = strategy_pool.get(strategy_id)
             if s:
-                return s.weight
+                weight = s.weight
+            else:
+                weight = 0.1
         except Exception as e:
             log.debug(f"strategy weight lookup failed for {strategy_id}: {e}")
-        return 0.1
+            weight = 0.1
+        if regime is not None and strategy_type:
+            from services.regime_adapt import strategy_multiplier
+            mult = strategy_multiplier(regime, strategy_type)
+            if mult <= 0:
+                return 0.0
+            weight *= mult
+        return weight
 
     async def _get_daily_pnl(self) -> float:
         """当日已实现盈亏（v2.0: 由 Trade 表汇总，供日亏损熔断，不再恒 0）"""
@@ -622,7 +635,7 @@ class StrategyRunner:
             log.warning(f"StrategyRunner[{sid}]: total capital = 0, skip")
             return
         strategy_type = self._resolve_strategy_type(obj)
-        weight = self._get_strategy_weight(sid)
+        weight = self._get_strategy_weight(sid, regime, strategy_type)
         current_position = self._positions_usdt.get(sid, 0.0)
 
         # 5. portfolio_allocator 计算分配金额
