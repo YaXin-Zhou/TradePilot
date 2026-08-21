@@ -155,7 +155,7 @@ class TestTradingServiceIntegration:
     async def test_enhanced_risk_check_strategy_disabled_default(self):
         """v2.1: 策略风控默认关闭"""
         ok, msg = await trading_service._enhanced_risk_check(
-            "user1", "BTC/USDT", "buy", 100,
+            "user1", "BTC/USDT", "buy", 1,
             source="strategy", strategy_id="test123",
             skip_cold_start=True,
         )

@@ -647,25 +647,18 @@ class StrategyRunner:
             log.warning(f"StrategyRunner[{sid}]: total capital = 0, skip")
             return
         strategy_type = self._resolve_strategy_type(obj)
-        weight = self._get_strategy_weight(sid, regime, strategy_type)
         current_position = self._positions_usdt.get(sid, 0.0)
 
-        # 5. portfolio_allocator 计算分配金额
-        plan = portfolio_allocator.allocate(
-            weights={sid: weight},
-            total_capital=total_capital,
-            current_positions={sid: current_position},
-            regime=regime,
-        )
-        allocation = next((a for a in plan.allocations if a.strategy_id == sid), None)
-        if not allocation or allocation.amount <= 0:
-            return  # hold 或无需调整
-        order_usdt = abs(allocation.amount)
+        # 5. v6: 简化仓位管理 — 已有持仓则 HOLD(不加仓)，避免反复开单
+        if current_position > 0:
+            log.info(f"StrategyRunner[{sid}]: already has position "
+                     f"(${current_position:.2f}), hold until close signal")
+            return
 
-        # 6. 金额硬上限检查
-        if order_usdt > settings.MAX_ORDER_AMOUNT_USDT:
-            order_usdt = settings.MAX_ORDER_AMOUNT_USDT
-            log.info(f"StrategyRunner[{sid}]: capped order to {order_usdt} (hard limit)")
+        # 单笔金额 = min(单笔上限, 总持仓上限)，用户可在 .env 控制
+        order_usdt = min(settings.MAX_ORDER_AMOUNT_USDT, settings.MAX_TOTAL_POSITION_USDT)
+        if order_usdt <= 0:
+            return
 
         # v6: 金额转「张数」——OKX 永续的 amount 单位是张(contracts)，不是币数量。
         # 张数 = USDT / (价格 × contractSize)。此前漏除 contractSize，导致下单张数

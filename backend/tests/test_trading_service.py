@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 class TestAmountLimits:
     def test_check_amount_limit_within_bounds(self):
         from services.trading_service import _check_amount_limit
-        ok, msg = _check_amount_limit(100.0)
+        ok, msg = _check_amount_limit(1.0)  # 小金额，恒在任意硬上限内
         assert ok
 
     def test_check_amount_limit_zero_or_negative(self):

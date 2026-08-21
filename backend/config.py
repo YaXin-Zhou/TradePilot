@@ -93,7 +93,7 @@ class Settings:
     ML_SEQUENCE_LENGTH: int = 60
     ML_TRAIN_INTERVAL_HOURS: int = 24
 
-    # 风险控制 — 保守档（用户确认）：单笔≤200，总持仓≤2000
+    # 风险控制 — 默认保守档；实际值请在 .env 覆盖（小资金建议单笔 20 / 总持仓 100）
     MAX_ORDER_AMOUNT_USDT: float = float(os.getenv("MAX_ORDER_AMOUNT_USDT", "200.0"))   # 单笔下单硬上限
     MAX_TOTAL_POSITION_USDT: float = float(os.getenv("MAX_TOTAL_POSITION_USDT", "2000.0"))  # 总持仓硬上限
     MAX_POSITION_SIZE_USDT: float = 5000.0

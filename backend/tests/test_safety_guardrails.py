@@ -37,7 +37,7 @@ class TestEnhancedRiskCheckDefaults:
     async def test_manual_default_no_limits(self):
         from services.trading_service import _enhanced_risk_check
         ok, msg = await _enhanced_risk_check(
-            "user1", "BTC/USDT", "buy", 100.0,
+            "user1", "BTC/USDT", "buy", 1.0,
             source="manual", skip_cold_start=True,
         )
         assert ok
@@ -46,7 +46,7 @@ class TestEnhancedRiskCheckDefaults:
     async def test_strategy_default_no_limits(self):
         from services.trading_service import _enhanced_risk_check
         ok, msg = await _enhanced_risk_check(
-            "user1", "BTC/USDT", "buy", 100.0,
+            "user1", "BTC/USDT", "buy", 1.0,
             source="strategy", strategy_id="test_s",
             skip_cold_start=True,
         )
@@ -79,9 +79,9 @@ class TestStrategyRiskLimits:
     @pytest.mark.asyncio
     async def test_max_order_allowed(self):
         from services.trading_service import _enhanced_risk_check
-        risk = {"enabled": True, "max_order_usdt": 200}
+        risk = {"enabled": True, "max_order_usdt": 50}
         ok, msg = await _enhanced_risk_check(
-            "user1", "BTC/USDT", "buy", 100.0,
+            "user1", "BTC/USDT", "buy", 10.0,
             source="strategy", strategy_id="test_limit2",
             strategy_risk=risk, skip_cold_start=True,
         )
