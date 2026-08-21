@@ -91,7 +91,12 @@ export default function StrategiesPage() {
   };
 
   const toggleStrategy = async (s: Record<string, any>) => {
-    await api.updateStrategy(s.id, { status: s.status === "running" ? "stopped" : "running" });
+    // v6 修复: 用 start/stop 端点(真正启动/停止 runner)，而非 PATCH 只改 DB 状态
+    if (s.status === "running") {
+      await api.stopStrategy(s.id);
+    } else {
+      await api.startStrategy(s.id);
+    }
     load();
   };
 
