@@ -69,10 +69,10 @@ async def reconcile() -> ReconcileResult:
         if sym:
             local_usdt_by_symbol[sym] = local_usdt_by_symbol.get(sym, 0.0) + usdt
 
-    # 6. 交易所按 symbol 汇总名义价值
+    # 6. 交易所按 symbol 汇总名义价值（统一为 BASE/QUOTE，去掉 :QUOTE 合约后缀）
     exch_by_symbol: dict[str, float] = {}
     for p in result.exchange_positions:
-        sym = p.get("symbol") or ""
+        sym = (p.get("symbol") or "").split(":")[0]  # "BTC/USDT:USDT" -> "BTC/USDT"
         if not sym:
             continue
         notional = float(p.get("notional", 0) or 0)
