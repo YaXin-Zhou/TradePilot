@@ -734,6 +734,11 @@ class StrategyRunner:
                         actual_cost = float(verified.get("cost", 0) or order_usdt)
                         order_amount = actual_filled
                         order_usdt = actual_cost if actual_cost > 0 else order_usdt
+                        # v6: 用核实后的成交状态覆盖 order（市价单初始 status=open/filled=0，
+                        # 否则落库的订单会错记成 OPEN/filled=0，导致对账误报「本地挂单但交易所不存在」）
+                        order["status"] = verified.get("status") or "closed"
+                        order["filled"] = actual_filled
+                        order["cost"] = actual_cost
                         log.info(f"[RUNNER_ORDER_VERIFIED] sid={sid} id={order['id']} "
                                  f"filled={actual_filled} cost={actual_cost:.2f}")
                     else:
@@ -851,6 +856,9 @@ class StrategyRunner:
                     if verified:
                         actual_filled = float(verified.get("filled", 0) or qty)
                         qty = actual_filled
+                        # v6: 覆盖 order 成交状态，避免平仓单错记 OPEN/filled=0
+                        order["status"] = verified.get("status") or "closed"
+                        order["filled"] = actual_filled
                         log.info(f"[RUNNER_CLOSE_VERIFIED] sid={sid} id={order['id']} "
                                  f"filled={actual_filled:.6f}")
                 except Exception as e:
