@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Strategy, StrategyType, StrategyStatus
+from db.models import Strategy, StrategyType, StrategyStatus, Trade
 from db.database import async_session
 from core.logger import log
 from services.strategy_log import append as log_event
@@ -25,8 +25,12 @@ _AI_TYPE_MAP: dict[str, StrategyType] = {
 
 
 async def list_all_strategies() -> list[dict]:
-    """获取所有策略列表（运行中的置顶，其余按创建时间倒序）"""
-    from sqlalchemy import case
+    """获取所有策略列表（运行中的置顶，其余按创建时间倒序）。
+
+    v6 问题4: total_pnl/total_trades/win_rate 由 Trade 表实时聚合（策略启动后的
+    实际成交盈亏），不再用回测数据填充。
+    """
+    from sqlalchemy import case, func
     async with async_session() as session:
         result = await session.execute(
             select(Strategy).order_by(
@@ -35,6 +39,25 @@ async def list_all_strategies() -> list[dict]:
             )
         )
         strategies = result.scalars().all()
+
+        # 各策略实际已平仓盈亏 + 交易数
+        pnl_rows = (await session.execute(
+            select(
+                Trade.strategy_id,
+                func.coalesce(func.sum(Trade.profit), 0.0),
+                func.count(Trade.id),
+            ).group_by(Trade.strategy_id)
+        )).all()
+        pnl_map = {sid: {"pnl": float(p), "trades": int(n)} for sid, p, n in pnl_rows}
+
+        # 各策略盈利笔数（win_rate 分子）
+        win_rows = (await session.execute(
+            select(Trade.strategy_id, func.count(Trade.id))
+            .where(Trade.profit > 0)
+            .group_by(Trade.strategy_id)
+        )).all()
+        wins_map = {sid: int(n) for sid, n in win_rows}
+
         return [
             {
                 "id": s.id,
@@ -43,9 +66,11 @@ async def list_all_strategies() -> list[dict]:
                 "status": s.status.value,
                 "symbol": s.symbol,
                 "config": s.config,
-                "total_pnl": s.total_pnl,
-                "total_trades": s.total_trades,
-                "win_rate": s.win_rate,
+                "total_pnl": round(pnl_map.get(s.id, {}).get("pnl", 0.0), 4),
+                "total_trades": pnl_map.get(s.id, {}).get("trades", 0),
+                "win_rate": round(
+                    wins_map.get(s.id, 0) / pnl_map.get(s.id, {}).get("trades", 1) * 100, 1
+                ) if pnl_map.get(s.id, {}).get("trades", 0) > 0 else 0.0,
                 "created_at": s.created_at.isoformat() if s.created_at else None,
             }
             for s in strategies
@@ -69,12 +94,22 @@ async def create_strategy(name: str, stype: StrategyType, symbol: str = "BTC/USD
 
 
 async def get_strategy_detail(strategy_id: str) -> dict:
-    """获取单个策略详情"""
+    """获取单个策略详情（v6: total_pnl/total_trades/win_rate 为 Trade 表实际盈亏）"""
+    from sqlalchemy import func
     async with async_session() as session:
         result = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
         s = result.scalar_one_or_none()
         if not s:
             return {"success": False, "error": "not found"}
+        pnl = await session.scalar(
+            select(func.coalesce(func.sum(Trade.profit), 0.0)).where(Trade.strategy_id == strategy_id)
+        ) or 0.0
+        trades = await session.scalar(
+            select(func.count(Trade.id)).where(Trade.strategy_id == strategy_id)
+        ) or 0
+        wins = await session.scalar(
+            select(func.count(Trade.id)).where(Trade.strategy_id == strategy_id, Trade.profit > 0)
+        ) or 0
         return {
             "success": True,
             "data": {
@@ -84,9 +119,9 @@ async def get_strategy_detail(strategy_id: str) -> dict:
                 "status": s.status.value,
                 "symbol": s.symbol,
                 "config": s.config,
-                "total_pnl": s.total_pnl,
-                "total_trades": s.total_trades,
-                "win_rate": s.win_rate,
+                "total_pnl": round(float(pnl), 4),
+                "total_trades": int(trades),
+                "win_rate": round(wins / trades * 100, 1) if trades > 0 else 0.0,
                 "sharpe_ratio": s.sharpe_ratio,
                 "max_drawdown": s.max_drawdown,
                 "created_at": s.created_at.isoformat() if s.created_at else None,
@@ -221,13 +256,21 @@ async def save_ai_strategy(
                 user_id=user_id or "default",
             )
 
-            # 写入回测指标
+            # v6 问题4: 回测指标存进 config["backtest"]，只把回测夏普写到 sharpe_ratio
+            # 列(供入场门槛 min_sharpe 用)。total_pnl/total_trades/win_rate 是「实盘
+            # 实际盈亏」列，由 list_all_strategies 从 Trade 表实时计算，绝不用回测填。
             if backtest:
-                strategy.total_trades = int(backtest.get("total_trades", 0))
-                strategy.win_rate = float(backtest.get("win_rate", 0))
                 strategy.sharpe_ratio = float(backtest.get("sharpe_ratio", 0))
-                strategy.max_drawdown = float(backtest.get("max_drawdown_pct", 0))
-                strategy.total_pnl = float(backtest.get("total_return_pct", 0))
+                strategy.config = {
+                    **(strategy.config or {}),
+                    "backtest": {
+                        "sharpe_ratio": float(backtest.get("sharpe_ratio", 0)),
+                        "max_drawdown_pct": float(backtest.get("max_drawdown_pct", 0)),
+                        "win_rate": float(backtest.get("win_rate", 0)),
+                        "total_trades": int(backtest.get("total_trades", 0)),
+                        "total_return_pct": float(backtest.get("total_return_pct", 0)),
+                    },
+                }
 
             session.add(strategy)
             await session.commit()
