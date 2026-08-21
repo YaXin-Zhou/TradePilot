@@ -160,12 +160,14 @@ class AIHeartbeat:
         self._last_cycle = result
 
         # v5: 将心跳审查结果写入各策略日志（此前 heartbeat 事件类型从未真正写入）
+        # v6 问题1b: 仅对 active(运行中) 策略写日志，避免未启动/休眠策略也有日志
         try:
             from services.strategy_log import append as log_event
+            active_ids = {s.strategy_id for s in snapshots if getattr(s, "status", "") == "active"}
             name_to_id = {s.name: s.strategy_id for s in snapshots}
             for r in recommendations:
                 sid = name_to_id.get(r.get("strategy_name", ""))
-                if sid:
+                if sid and sid in active_ids:
                     log_event(sid, "heartbeat",
                               f"{r.get('action', 'review')}: {r.get('reason', '')}",
                               r)
