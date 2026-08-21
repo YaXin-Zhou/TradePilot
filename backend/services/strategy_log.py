@@ -244,36 +244,3 @@ async def recover_all_from_db(limit_per_strategy: int = 200) -> int:
     except Exception as e:
         app_log.warning(f"StrategyLog: recover_all_from_db failed: {e}")
         return 0
-
-
-async def backfill_created_events() -> int:
-    """为「没有任何日志」的策略补写一条 created 事件（V5 问题1 补漏）。
-
-    历史 AI 策略经 save_ai_strategy 入库时未落 created 日志，导致日志页恒为空。
-    此处用策略真实 created_at 回填，保证每个策略至少可见一条创建事件。
-    """
-    try:
-        from sqlalchemy import select
-        from db.database import async_session
-        from db.models import Strategy
-        async with async_session() as session:
-            result = await session.execute(select(Strategy))
-            strategies = result.scalars().all()
-
-        created = 0
-        for s in strategies:
-            with _lock:
-                has_logs = bool(_buffer.get(s.id))
-            if has_logs:
-                continue
-            stype = s.type.value if hasattr(s.type, "value") else str(s.type)
-            append(s.id, "created",
-                   f"Strategy '{s.name}' created ({stype} on {s.symbol})",
-                   created_at=s.created_at)
-            created += 1
-        if created:
-            app_log.info(f"StrategyLog: backfilled created events for {created} strategies")
-        return created
-    except Exception as e:
-        app_log.warning(f"StrategyLog: backfill_created_events failed: {e}")
-        return 0

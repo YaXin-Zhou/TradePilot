@@ -482,9 +482,11 @@ class StrategyRunner:
         try:
             from services.strategy_pool import strategy_pool
             s = strategy_pool.get(strategy_id)
-            if s:
+            if s and s.weight > 0:
                 weight = s.weight
             else:
+                # v6: 池中无记录或权重为 0（未分配/被在线学习清零）时给默认权重，
+                # 否则信号永远不下单（allocator 过滤 weight<=0）
                 weight = 0.1
         except Exception as e:
             log.debug(f"strategy weight lookup failed for {strategy_id}: {e}")

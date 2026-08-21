@@ -64,7 +64,7 @@ async def create_strategy(name: str, stype: StrategyType, symbol: str = "BTC/USD
         session.add(strategy)
         await session.commit()
         await session.refresh(strategy)
-        log_event(strategy.id, "created", f"Strategy '{name}' created ({stype.value} on {symbol})")
+        # v6: 日志改为「运行日志」，创建时不落 created（未启动策略不显示日志）
         return {"success": True, "data": {"id": strategy.id}}
 
 
@@ -234,7 +234,6 @@ async def save_ai_strategy(
             await session.refresh(strategy)
             sid = strategy.id
 
-        log_event(sid, "created", f"AI strategy '{name}' created ({strategy_type} on {symbol})")
         log.info(f"AI 策略自动入库: {sid} ({name}, {strategy_type})")
         return {"success": True, "data": {"id": sid}}
 
