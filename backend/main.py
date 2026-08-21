@@ -108,6 +108,11 @@ async def lifespan(app: FastAPI):
     # Phase 8: 恢复 RUNNING 策略（崩溃恢复）
     try:
         from strategies.runner import runner
+        # v6: 先加载持久化持仓状态，再对账（检测「本地 vs 交易所」持仓差异并告警），
+        # 最后才恢复策略，避免基于陈旧持仓开跑导致重复开仓/漏平。
+        await runner._load_persistent_state()
+        from services.reconcile_service import reconcile_and_alert
+        await reconcile_and_alert()
         await runner.recover_running_strategies()
     except Exception as e:
         log.error(f"Strategy recovery failed (non-fatal): {e}")

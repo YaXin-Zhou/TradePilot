@@ -269,6 +269,15 @@ async def system_heartbeat():
         log.warning(f"[HEARTBEAT] failed: {e}")
 
 
+async def reconcile_job():
+    """v6: 每 5 分钟对账（交易所持仓/挂单 vs 本地状态），差异自动告警"""
+    try:
+        from services.reconcile_service import reconcile_and_alert
+        await reconcile_and_alert()
+    except Exception as e:
+        log.warning(f"Reconcile job failed: {e}")
+
+
 def start_scheduler():
     scheduler.add_job(sync_market_data, IntervalTrigger(hours=1), id="sync_market_data", replace_existing=True)
     scheduler.add_job(retrain_ml_models, IntervalTrigger(hours=24), id="retrain_ml_models", replace_existing=True)
@@ -281,6 +290,8 @@ def start_scheduler():
     scheduler.add_job(system_heartbeat, IntervalTrigger(seconds=60), id="system_heartbeat", replace_existing=True)
     # 策略日志刷盘（每 10 秒将内存队列写入 DB）
     scheduler.add_job(flush_strategy_logs, IntervalTrigger(seconds=10), id="flush_strategy_logs", replace_existing=True)
+    # v6: 交易所对账（每 5 分钟，差异告警）
+    scheduler.add_job(reconcile_job, IntervalTrigger(minutes=5), id="reconcile", replace_existing=True)
     # v2.0: 在线学习（每天更新策略表现 + 权重，数据源 Trade 表）
     scheduler.add_job(update_online_learning, IntervalTrigger(hours=24), id="update_online_learning", replace_existing=True)
     # Phase 8: 任务执行监听（异常隔离 + 记录）
@@ -288,7 +299,7 @@ def start_scheduler():
     scheduler.start()
     log.info("Scheduler started (market data: 1h, ML retrain: 24h, AI heartbeat: 6h, "
              "kill_switch refresh: 5s, pending orders flush: 30s, system heartbeat: 60s, "
-             "strategy log flush: 10s, online learning: 24h)")
+             "strategy log flush: 10s, reconcile: 5m, online learning: 24h)")
 
 
 def stop_scheduler():

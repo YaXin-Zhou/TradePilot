@@ -9,11 +9,13 @@
 ## 一、执行层加固（最优先：不亏在 bug 上）
 
 ### 1.1 对账脚本修正 + 接入调度器
-- [ ] `scripts/reconcile.py` 现用废弃的 `Position` 表对账，改为合约真源 `RunnerState`（positions_usdt/qty）
-- [ ] 把 `reconcile()` 接入 scheduler（每 5 分钟），差异自动告警（走 alert_service）
+- [x] `services/reconcile_service.py` 改为合约真源 `RunnerState`（runner 内存持仓 + Strategy.symbol 映射），按名义价值(USDT)对比，规避「张数 vs 币数量」单位差
+- [x] 接入 scheduler（每 5 分钟），差异自动告警（`reconcile_and_alert`）
+- [x] `scripts/reconcile.py` 改为 CLI 薄封装
 
 ### 1.2 启动时持仓对账
-- [ ] 启动时 `fetch_positions()` 与本地 `RunnerState` 对比，发现「交易所有持仓但本地无 / 本地有但交易所无」时自动纠正 + 告警
+- [x] 启动时先 `_load_persistent_state` → `reconcile_and_alert()` 检测「本地 vs 交易所」持仓差异并告警，再恢复策略（避免基于陈旧持仓开跑）
+- [x] 采用「检测 + 告警」而非静默自动纠正（自动纠正持仓是亏损重灾区，有人值守手动处理更安全）
 
 ### 1.3 runner 下单/平仓补幂等键 + 幽灵单反查
 - [ ] runner 自动下单/平仓路径统一走 clientOrderId + 失败后反查（复用 trading_service 的 `_reconcile_order_by_client_id` 思路），防幽灵单
@@ -21,11 +23,11 @@
 ## 二、告警（有人值守的前提）
 
 ### 2.1 告警通道配置化 + 通用 Webhook
-- [ ] `config.py` 的 TELEGRAM_BOT_TOKEN/CHAT_ID 现为硬编码空串，改为读 `.env`
-- [ ] 新增 `ALERT_WEBHOOK_URL` 通用 Webhook 通道（Telegram 缺省时可用）
+- [x] `config.py` 的 TELEGRAM_BOT_TOKEN/CHAT_ID 现为硬编码空串，改为读 `.env`
+- [x] 新增 `ALERT_WEBHOOK_URL` 通用 Webhook 通道（Telegram 缺省时可用）
 
 ### 2.2 关键事件全量接入告警
-- [ ] kill switch 触发/解除、日亏熔断、对账差异、心跳掉线、策略 error 全部推送到 alert_service（已部分接入：signal/stop_loss/daily_summary/kill_switch）
+- [x] kill switch 触发/解除、日亏熔断、对账差异、心跳掉线、策略 error 全部推送到 alert_service（信号/止损/下单失败已接入 runner）
 
 ## 三、砍过拟合（AI 挖因子的反噬）
 
