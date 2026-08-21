@@ -18,7 +18,8 @@
 - [x] 采用「检测 + 告警」而非静默自动纠正（自动纠正持仓是亏损重灾区，有人值守手动处理更安全）
 
 ### 1.3 runner 下单/平仓补幂等键 + 幽灵单反查
-- [ ] runner 自动下单/平仓路径统一走 clientOrderId + 失败后反查（复用 trading_service 的 `_reconcile_order_by_client_id` 思路），防幽灵单
+- [x] 新增 `_place_with_client_id`：下单/平仓统一携带 clientOrderId，失败时按 clientOrderId 反查交易所，订单实际存在则视同成功（防幽灵单重复下单）
+- [x] `_tick` 开仓 + `_close_position` 平仓均接入
 
 ## 二、告警（有人值守的前提）
 

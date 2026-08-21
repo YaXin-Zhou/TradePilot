@@ -681,16 +681,18 @@ class StrategyRunner:
             log.info(f"StrategyRunner[{sid}] risk blocked: {risk_result.reason}")
             return
 
-        # 8. 下单 + 对账
+        # 8. 下单 + 对账（v6 1.3: 携带 clientOrderId，失败时反查防幽灵单）
         try:
-            order = await asyncio.to_thread(
-                exmod.shared_exchange.create_market_order, obj.symbol, side, order_amount
-            )
+            order, cid = await self._place_with_client_id(obj.symbol, side, order_amount)
+            if not order:
+                log.error(f"StrategyRunner[{sid}] order returned empty")
+                return
             log.info(f"[RUNNER_ORDER] sid={sid} {side} {order_amount:.6f} "
-                     f"(@{current_price:.2f} = ${order_usdt:.2f}) id={order.get('id')}")
+                     f"(@{current_price:.2f} = ${order_usdt:.2f}) id={order.get('id')} cid={cid}")
             log_event(sid, "order_placed",
                       f"{side.upper()} {order_amount:.6f} @ ${current_price:.2f} (≈${order_usdt:.2f})",
-                      {"side": side, "amount": order_amount, "price": current_price, "order_id": order.get("id")})
+                      {"side": side, "amount": order_amount, "price": current_price,
+                       "order_id": order.get("id"), "client_order_id": cid})
 
             # 对账（fetch_order 校验订单真实存在）
             if order.get("id"):
@@ -755,6 +757,37 @@ class StrategyRunner:
                  f"usdt={self._positions_usdt[sid]:.2f}")
         await self._persist_state(sid)
 
+    async def _place_with_client_id(self, symbol: str, side: str, amount: float,
+                                    reduce_only: bool = False) -> tuple[Optional[dict], str]:
+        """下单并携带 clientOrderId；失败时按 clientOrderId 反查（防幽灵单）。
+
+        v6 1.3: 网络超时/异常时交易所可能已成交（幽灵单），本地却当失败处理会
+        导致重复下单。此方法在异常后反查 clientOrderId，若订单真实存在则返回
+        已成交订单（视同成功），否则向上抛出。
+        返回 (order, client_order_id)。
+        """
+        from services.trading_service import _make_client_order_id
+        cid = _make_client_order_id()
+        try:
+            order = await asyncio.to_thread(
+                exmod.shared_exchange.create_market_order,
+                symbol, side, amount, reduce_only, cid,
+            )
+            return order, cid
+        except Exception as e:
+            # 幽灵单反查：按 clientOrderId 查交易所，若订单实际存在则视为成功
+            try:
+                verified = await asyncio.to_thread(
+                    exmod.shared_exchange.fetch_order_by_client_id, cid, symbol
+                )
+                if verified and verified.get("id"):
+                    log.warning(f"Runner: ghost order reconciled via clientOrderId={cid} "
+                                f"-> id={verified.get('id')}")
+                    return verified, cid
+            except Exception as _re:
+                log.debug(f"Runner: clientOrderId reconcile failed: {_re}")
+            raise
+
     async def _close_position(self, sid: str, symbol: str, side: str):
         """平仓（v2.0: 部分成交时保留剩余仓位）"""
         qty = self._positions_qty.get(sid, 0.0)
@@ -768,14 +801,17 @@ class StrategyRunner:
                  f"side={close_side} qty={qty:.6f}")
         try:
             # v2.1: 平仓走 reduce_only（双向持仓模式，posSide 由方向自动推导）
-            order = await asyncio.to_thread(
-                exmod.shared_exchange.create_market_order, symbol, close_side, qty, True
-            )
+            # v6 1.3: 携带 clientOrderId，失败时反查防幽灵单
+            order, cid = await self._place_with_client_id(symbol, close_side, qty, True)
+            if not order:
+                log.error(f"[RUNNER_CLOSE_FAILED] sid={sid} order empty")
+                return
             log.info(f"[RUNNER_CLOSE_DONE] sid={sid} id={order.get('id')} "
-                     f"side={close_side} qty={qty:.6f}")
+                     f"side={close_side} qty={qty:.6f} cid={cid}")
             log_event(sid, "order_placed",
                       f"CLOSE {close_side.upper()} {qty:.6f} @ market (id={order.get('id')})",
-                      {"side": close_side, "amount": qty, "order_id": order.get("id")})
+                      {"side": close_side, "amount": qty, "order_id": order.get("id"),
+                       "client_order_id": cid})
 
             # 对账
             if order.get("id"):
