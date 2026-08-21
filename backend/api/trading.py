@@ -67,17 +67,8 @@ async def api_get_balance(_user: dict = Depends(get_current_user)):
 
 @router.post("/limit-order")
 async def api_limit_order(req: LimitOrderRequest, _user: dict = Depends(require_admin)):
-    order, error, is_mock = await place_limit_order(
-        _user.get("id", "system"), req.symbol, req.side, req.amount, req.price,
-        confirm_live=req.confirm_live,
-        account_id=req.account_id,  # M3: 多账户
-    )
-    if error:
-        return {"success": False, "error": error}
-    resp = {"success": True, "data": order}
-    if is_mock:
-        resp["_mock"] = True
-    return resp
+    # v6: 手动交易已取消，仅策略自动交易
+    return {"success": False, "error": "手动交易已禁用，请通过策略(自动交易)下单"}
 
 
 @router.post("/cancel-order")
@@ -98,17 +89,8 @@ async def api_cancel_all(symbol: str = "", _user: dict = Depends(require_admin))
 
 @router.post("/market-order")
 async def api_market_order(req: MarketOrderRequest, _user: dict = Depends(require_admin)):
-    order, error, is_mock = await place_market_order(
-        _user.get("id", "system"), req.symbol, req.side, req.amount,
-        confirm_live=req.confirm_live,
-        account_id=req.account_id,  # M3: 多账户
-    )
-    if error:
-        return {"success": False, "error": error}
-    resp = {"success": True, "data": order}
-    if is_mock:
-        resp["_mock"] = True
-    return resp
+    # v6: 手动交易已取消，仅策略自动交易
+    return {"success": False, "error": "手动交易已禁用，请通过策略(自动交易)下单"}
 
 
 @router.get("/open-orders")

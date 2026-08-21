@@ -3,8 +3,7 @@ import { api } from "../lib/api";
 import { useLanguage } from "../lib/LanguageContext";
 import { Brain, Send, Zap, RefreshCw, TrendingUp, TrendingDown, Minus, ArrowUpRight, ArrowDownRight } from "lucide-react";
 import type { AiAnalyzeResult, AiAnalyzeRequest } from "../types/strategy";
-import type { Ticker, Balance, PlaceOrderResult } from "../types/portfolio";
-import type { ApiError } from "../types/api";
+import type { Ticker } from "../types/portfolio";
 import { asApiError } from "../types/api";
 
 
@@ -14,14 +13,9 @@ export default function AIStrategyPage() {
   const [result, setResult] = useState<AiAnalyzeResult | null>(null);
   const [ticker, setTicker] = useState<Ticker | null>(null);
   const [connected, setConnected] = useState<boolean | null>(null);
-  const [balance, setBalance] = useState<Balance | null>(null);
-  const [orderAmount, setOrderAmount] = useState(100);
-  const [placingOrder, setPlacingOrder] = useState(false);
-  const [placedOrder, setPlacedOrder] = useState<PlaceOrderResult | null>(null);
 
   useEffect(() => {
     api.getTicker().then(setTicker).catch(() => {});
-    api.getBalance().then(setBalance).catch(() => {});
     api.testAIConnection().then(() => setConnected(true)).catch(() => setConnected(false));
   }, []);
 
@@ -37,19 +31,6 @@ export default function AIStrategyPage() {
       setResult({ error: asApiError(e).message });
     }
     setLoading(false);
-  };
-
-  const placeOrder = async (signal: string) => {
-    const side = signal.includes("buy") ? "buy" : "sell";
-    setPlacingOrder(true);
-    setPlacedOrder(null);
-    try {
-      const res = await api.placeMarketOrder({ side, amount: orderAmount });
-      setPlacedOrder(res);
-    } catch (e: unknown) {
-      setPlacedOrder({ id: "", symbol: "", side: "buy", amount: 0, status: "error", timestamp: 0, error: asApiError(e).message });
-    }
-    setPlacingOrder(false);
   };
 
   const autoAnalyze = async () => {
@@ -157,49 +138,18 @@ export default function AIStrategyPage() {
               )}
             </div>
           )}
-          {result && result.signal && (result.signal === "buy" || result.signal === "strong_buy" || result.signal === "sell" || result.signal === "strong_sell") && (
+          {result && (result.strategy_description || result.backtest) && (
             <div className="mt-4 pt-4 border-t border-dark-800">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-semibold text-white">Execute Trade</span>
-                {balance && (
-                  <span className="text-xs text-dark-400">
-                    USDT: ${balance.USDT?.free?.toFixed(2) || "0.00"}
-                  </span>
-                )}
-              </div>
               <div className="space-y-3">
-                <div>
-                  <label className="text-xs text-dark-400 block mb-1">Amount (USDT)</label>
-                  <input type="number" value={orderAmount}
-                    onChange={e => setOrderAmount(Number(e.target.value))}
-                    className="w-full text-sm py-1.5 px-2 rounded border border-dark-800 bg-dark-900 text-dark-200" />
-                </div>
-                <button onClick={() => placeOrder(result.signal || "")}
-                  disabled={placingOrder}
-                  className="w-full flex items-center justify-center gap-2 text-sm py-2.5 rounded font-semibold"
-                  style={{
-                    background: result.signal.includes("buy") ? "#00c076" : "#f6465d",
-                    color: "#000",
-                    opacity: placingOrder ? 0.6 : 1,
-                  }}>
-                  {placingOrder ? "Placing..." : result.signal.includes("buy") ? "Buy BTC" : "Sell BTC"}
-                </button>
-                {placedOrder && (
-                  <div className={`text-xs p-2 rounded ${placedOrder.error ? "bg-okx-red/10 text-okx-red" : "bg-okx-green/10 text-okx-green"}`}>
-                    {placedOrder.error
-                      ? "Error: " + placedOrder.error
-                      : "Order placed! ID: " + placedOrder.id + " Status: " + placedOrder.status}
-                  </div>
-                )}
                 {result.strategy_description && (
-                  <div className="mt-3 pt-3 border-t border-dark-800">
+                  <div>
                     <span className="text-xs font-semibold text-white mb-2 block">AI Generated Strategy</span>
                     <p className="text-xs text-dark-300">{result.strategy_description}</p>
                     {result.market_assessment && <p className="text-xs text-dark-500 mt-1">Market: {result.market_assessment}</p>}
                   </div>
                 )}
                 {result.backtest && (
-                  <div className="mt-3 pt-3 border-t border-dark-800">
+                  <div className="pt-3 border-t border-dark-800">
                     <span className="text-xs font-semibold text-white mb-2 block">Backtest Result</span>
                     <div className="grid grid-cols-2 gap-1 text-xs">
                       <div className="flex justify-between py-0.5"><span className="text-dark-400">Return</span><span className={"font-mono " + ((result.backtest.total_return_pct ?? 0) >= 0 ? "text-okx-green" : "text-okx-red")}>{result.backtest.total_return_pct?.toFixed(2)}%</span></div>
