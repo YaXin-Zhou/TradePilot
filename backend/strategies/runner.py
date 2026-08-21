@@ -630,6 +630,16 @@ class StrategyRunner:
             getattr(signal, "reason", "") or ""
         )
 
+        # v6: 信号平仓语义（长线为主，不做空）
+        #   BUY/STRONG_BUY → 开多/加多（走下方开仓流程）
+        #   SELL/STRONG_SELL → 平多（reduce-only），无持仓则忽略
+        if signal.type in (SignalType.SELL, SignalType.STRONG_SELL):
+            if self._positions_qty.get(sid, 0.0) > 0:
+                log.info(f"StrategyRunner[{sid}] SELL signal -> close long "
+                         f"(qty={self._positions_qty.get(sid, 0.0):.6f})")
+                await self._close_position(sid, obj.symbol, "long")
+            return
+
         # 4. 风控 + 仓位计算
         regime = await self._detect_regime(obj.symbol)
         total_capital = await self._get_total_capital()
