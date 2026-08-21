@@ -207,7 +207,9 @@ class AppConfig(Base):
 class AuditLog(Base):
     """审计日志 — 记录所有关键操作（下单/撤单/配置变更/紧急停止等）"""
     __tablename__ = "audit_logs"
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    # v6: BigInteger 在 SQLite 不自动自增(仅 INTEGER PRIMARY KEY 自增)，导致
+    # NOT NULL constraint failed: audit_logs.id，改为 Integer
+    id = Column(Integer, primary_key=True, autoincrement=True)
     event_time = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     actor = Column(String(64))                     # user_id / "system" / "scheduler"
     action = Column(String(128))                   # "place_order" / "kill_switch" / "config_change"
