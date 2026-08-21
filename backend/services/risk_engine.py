@@ -25,6 +25,10 @@ from core.logger import log
 from services.regime_detector import MarketRegime
 from db.models import StrategyType  # Phase 7.1: 统一枚举来源
 
+# v6: 日亏熔断告警冷却（秒），避免每个 tick 重复轰炸
+_DAILY_LOSS_ALERT_COOLDOWN = 300.0
+_last_daily_loss_alert_ts = 0.0
+
 # ------------------------------------------------------------------
 # 数据模型
 # ------------------------------------------------------------------
@@ -326,6 +330,7 @@ class RiskEngine:
         checks["daily_loss"] = loss_pct < policy.max_daily_loss_pct
 
         if not checks["daily_loss"]:
+            self._fire_daily_loss_alert(abs(daily_pnl), total_capital * policy.max_daily_loss_pct / 100)
             return RiskCheckResult(
                 passed=False,
                 reason=f"Daily loss {loss_pct:.1f}% exceeds limit {policy.max_daily_loss_pct}%",
@@ -334,6 +339,20 @@ class RiskEngine:
             )
 
         return RiskCheckResult(passed=True, checks=checks, active_policy=policy.to_dict())
+
+    def _fire_daily_loss_alert(self, loss_usdt: float, limit_usdt: float):
+        """日亏熔断告警（带冷却，fire-and-forget）"""
+        global _last_daily_loss_alert_ts
+        now = time.time()
+        if now - _last_daily_loss_alert_ts < _DAILY_LOSS_ALERT_COOLDOWN:
+            return
+        _last_daily_loss_alert_ts = now
+        try:
+            from services.alert_service import alert_service
+            loop = asyncio.get_running_loop()
+            loop.create_task(alert_service.daily_loss_breach(loss_usdt, limit_usdt))
+        except RuntimeError:
+            pass  # 无事件循环（测试/脚本），跳过
 
     def check_correlation(self, strategy_returns: list[float],
                           pool_returns: dict[str, list[float]],

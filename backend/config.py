@@ -58,8 +58,11 @@ class Settings:
     AUTH_DISABLED: bool = os.getenv("AUTH_DISABLED", "true").lower() == "true"
 
     # Telegram (optional, empty = disabled)
-    TELEGRAM_BOT_TOKEN: str = ""
-    TELEGRAM_CHAT_ID: str = ""
+    TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
+
+    # 通用告警 Webhook（可选，Telegram 未配置时可用，如企业微信/钉钉/自建服务）
+    ALERT_WEBHOOK_URL: str = os.getenv("ALERT_WEBHOOK_URL", "")
 
     # AI
     DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")

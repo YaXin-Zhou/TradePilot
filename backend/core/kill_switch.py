@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from core.logger import log
+from services.alert_service import alert_service
 
 # ------------------------------------------------------------------
 # 状态
@@ -192,6 +193,7 @@ class KillSwitch:
             f"⚠️ KILL SWITCH TRIGGERED by={by} reason={reason}. "
             "All trading is now BLOCKED until manual reset."
         )
+        self._fire_alert(lambda: alert_service.kill_switch_triggered(reason or "Manual emergency stop"))
         return self._state
 
     async def trigger_with_actions(self, by: str = "manual", reason: str = "") -> KillSwitchState:
@@ -269,7 +271,20 @@ class KillSwitch:
             f"Kill switch reset (was triggered at "
             f"{datetime.fromtimestamp(old.triggered_at or 0, tz=timezone.utc).isoformat() if old.triggered_at else 'N/A'})"
         )
+        self._fire_alert(lambda: alert_service.kill_switch_reset())
         return self._state
+
+    def _fire_alert(self, coro_factory):
+        """fire-and-forget 发送告警（不阻塞状态变更主链路）。
+
+        coro_factory 为 0 参 lambda，仅在有事件循环时才创建协程，避免同步场景
+        产生「coroutine was never awaited」。
+        """
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(coro_factory())
+        except RuntimeError:
+            pass  # 无事件循环（同步脚本），跳过
 
     # ------------------------------------------------------------------
     # 持久化（fire-and-forget 异步写 DB）

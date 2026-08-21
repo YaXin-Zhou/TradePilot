@@ -1,4 +1,5 @@
 import asyncio
+import time
 """APScheduler 定时任务 — Phase 8 任务隔离 + 执行记录"""
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -15,6 +16,22 @@ def _job_listener(event):
         log.error(f"Scheduler job {event.job_id} FAILED: {event.exception}")
     else:
         log.debug(f"Scheduler job {event.job_id} executed OK")
+
+
+# v6: 交易所掉线告警冷却（秒）
+_EXCHANGE_OFFLINE_ALERT_COOLDOWN = 1800.0
+_last_exchange_offline_alert_ts = 0.0
+
+
+async def _fire_exchange_offline_alert(exchange_name: str):
+    """交易所掉线告警（带 30 分钟冷却）"""
+    global _last_exchange_offline_alert_ts
+    now = time.time()
+    if now - _last_exchange_offline_alert_ts < _EXCHANGE_OFFLINE_ALERT_COOLDOWN:
+        return
+    _last_exchange_offline_alert_ts = now
+    from services.alert_service import alert_service
+    await alert_service.heartbeat_offline(f"交易所 {exchange_name} 连接断开，自动交易已暂停，请检查")
 
 
 async def sync_market_data():
@@ -223,6 +240,10 @@ async def system_heartbeat():
 
         # kill_switch
         ks_status = kill_switch.get_state().get("status", "?")
+
+        # v6: 交易所掉线告警（冷却 30 分钟，避免每分钟轰炸）
+        if not exchange_ok:
+            await _fire_exchange_offline_alert(exchange_name)
 
         # 内存队列
         pending = len(_pending_order_records)

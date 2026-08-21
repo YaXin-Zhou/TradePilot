@@ -597,6 +597,8 @@ class StrategyRunner:
                 log_event(sid, "stop_loss", f"Stop loss triggered: {result.message}", {
                     "price": current_price, "stop_price": result.stop_price,
                 })
+                loss_pct = getattr(result, "loss_pct", 0.0) or 0.0
+                await alert_service.stop_loss(getattr(obj, "name", sid[:8]), obj.symbol, loss_pct)
                 await self._close_position(sid, obj.symbol, sm.side)
                 return
 
@@ -608,6 +610,10 @@ class StrategyRunner:
         side = "buy" if signal.type in (SignalType.BUY, SignalType.STRONG_BUY) else "sell"
         log_event(sid, f"signal_{side}", f"Signal: {signal.type.value} @ ${current_price:.2f}",
                   {"price": current_price, "signal": signal.type.value})
+        await alert_service.signal(
+            getattr(obj, "name", sid[:8]), obj.symbol, side, current_price,
+            getattr(signal, "reason", "") or ""
+        )
 
         # 4. 风控 + 仓位计算
         regime = await self._detect_regime(obj.symbol)
@@ -707,10 +713,12 @@ class StrategyRunner:
         except ExchangeError as e:
             log.error(f"StrategyRunner[{sid}] order FAILED: {e}")
             log_event(sid, "order_error", f"Order failed: {e}", {"error": str(e)})
+            await alert_service.strategy_error(getattr(obj, "name", sid[:8]), f"Order failed: {e}")
             return
         except Exception as e:
             log.error(f"StrategyRunner[{sid}] order exception: {e}")
             log_event(sid, "order_error", f"Order exception: {e}", {"error": str(e)})
+            await alert_service.strategy_error(getattr(obj, "name", sid[:8]), f"Order exception: {e}")
             return
 
         # v2.0: 审计落库（自动策略订单也走 orders + audit_logs 补偿链）
